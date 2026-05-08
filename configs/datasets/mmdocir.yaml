@@ -1,0 +1,6 @@
+name: mmdocir
+raw_dir: ${MMDOC_RAG_DATA_ROOT}/raw/mmdocir
+interim_dir: ${MMDOC_RAG_DATA_ROOT}/interim/mmdocir
+processed_dir: ${MMDOC_RAG_DATA_ROOT}/processed/mmdocir
+language: mixed
+role: main_retrieval

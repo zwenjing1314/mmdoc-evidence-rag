@@ -1,0 +1,11 @@
+experiment_name: demo_bm25_page
+dataset: demo
+retriever:
+  type: bm25_page
+  top_k: [1, 5, 10]
+evaluation:
+  metrics:
+    - page_recall
+    - mrr
+    - ndcg
+output_dir: runs/retrieval/demo_bm25_page

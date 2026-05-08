@@ -1,0 +1,11 @@
+experiment_name: e01_bm25_page
+dataset: mmdocir
+retriever:
+  type: bm25_page
+  top_k: [1, 5, 10]
+evaluation:
+  metrics:
+    - page_recall
+    - mrr
+    - ndcg
+output_dir: runs/retrieval/e01_bm25_page

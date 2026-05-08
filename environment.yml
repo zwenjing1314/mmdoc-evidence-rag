@@ -1,0 +1,44 @@
+name: mmdoc-rag
+channels:
+  - conda-forge
+  - defaults
+dependencies:
+  - python=3.11
+  - pip
+  - ipykernel
+  - jupyterlab
+  - numpy
+  - scipy
+  - pandas
+  - pyarrow
+  - scikit-learn
+  - pillow
+  - pip:
+      - accelerate
+      - datasets
+      - duckdb
+      - faiss-cpu
+      - huggingface-hub
+      - loguru
+      - opencv-python
+      - openpyxl
+      - pdfplumber
+      - polars
+      - pydantic>=2
+      - pydantic-settings
+      - pymupdf
+      - python-dotenv
+      - pyyaml
+      - rank-bm25
+      - ranx
+      - rich
+      - sentence-transformers
+      - tokenizers
+      - tqdm
+      - transformers
+      - typer
+      - pytest
+      - pytest-cov
+      - ruff
+      - mypy
+      - pre-commit

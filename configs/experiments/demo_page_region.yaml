@@ -1,0 +1,17 @@
+experiment_name: demo_page_region
+dataset: demo
+retriever:
+  type: page_region
+  page_retriever: dense_page
+  region_retriever: layout_node
+  page_top_k: 3
+  region_top_k: 3
+  fusion:
+    method: rrf
+evaluation:
+  metrics:
+    - page_recall
+    - region_hit
+    - mrr
+    - ndcg
+output_dir: runs/retrieval/demo_page_region

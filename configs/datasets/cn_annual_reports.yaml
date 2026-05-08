@@ -1,0 +1,7 @@
+name: cn_annual_reports
+raw_dir: ${MMDOC_RAG_DATA_ROOT}/raw/cn_annual_reports
+pdf_dir: ${MMDOC_RAG_DATA_ROOT}/raw/cn_annual_reports/pdfs
+interim_dir: ${MMDOC_RAG_DATA_ROOT}/interim/cn_annual_reports
+processed_dir: ${MMDOC_RAG_DATA_ROOT}/processed/cn_annual_reports
+language: zh
+role: application_validation

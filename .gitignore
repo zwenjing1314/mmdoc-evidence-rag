@@ -1,0 +1,36 @@
+.DS_Store
+.env
+.venv/
+.uv-cache/
+.uv-python/
+__pycache__/
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
+.ipynb_checkpoints/
+
+# Large or reproducible data/artifacts
+data/raw/
+data/interim/
+data/processed/
+artifacts/
+runs/
+
+# Common generated files
+*.parquet
+*.faiss
+*.npy
+*.npz
+*.pt
+*.ckpt
+*.pdf
+*.png
+*.jpg
+*.jpeg
+*.xlsx
+*.csv
+
+!.gitkeep
+!docs/*.md
+!configs/**/*.yaml
+!README.md

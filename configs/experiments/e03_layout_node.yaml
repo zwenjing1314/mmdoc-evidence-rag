@@ -1,0 +1,19 @@
+experiment_name: e03_layout_node
+dataset: mmdocir
+retriever:
+  type: layout_node
+  encoder: BAAI/bge-m3
+  node_types:
+    - title
+    - paragraph
+    - table
+    - figure
+    - formula
+  top_k: [1, 5, 10]
+evaluation:
+  metrics:
+    - page_recall
+    - region_hit
+    - evidence_type_hit
+    - mrr
+output_dir: runs/retrieval/e03_layout_node
