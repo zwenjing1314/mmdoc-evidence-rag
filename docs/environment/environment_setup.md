@@ -4,7 +4,7 @@
 
 > **PyCharm + uv + `pyproject.toml` + `uv.lock`**
 
-Conda/Anaconda3 作为第二方案保留，主要用于你在某台机器上遇到 CUDA、系统库或 PyCharm 解释器兼容问题时兜底。
+Conda/Anaconda3 作为第二方案保留，主要用于在某台机器上遇到 CUDA、系统库或 PyCharm 解释器兼容问题时兜底。
 
 ## 1. 为什么主方案改用 uv
 
@@ -17,7 +17,7 @@ Conda/Anaconda3 作为第二方案保留，主要用于你在某台机器上遇�
 - pip 风格安装；
 - 命令运行。
 
-相比单独维护 `requirements.txt`，`uv + pyproject.toml + uv.lock` 更适合本项目这种需要长期复现实验的论文工程。后续你在 Mac 上开发、Ubuntu 3080Ti 上跑实验，两边都可以使用同一份 `pyproject.toml` 和 `uv.lock` 尽量保持依赖一致。
+相比单独维护 `requirements.txt`，`uv + pyproject.toml + uv.lock` 更适合本项目这种需要长期复现实验的论文工程。后续在 Mac 上开发、Ubuntu 3080Ti 上跑实验，两边都可以使用同一份 `pyproject.toml` 和 `uv.lock` 尽量保持依赖一致。
 
 ## 2. 当前环境文件分工
 
@@ -95,9 +95,13 @@ uv sync --dev
 ```
 
 3. 先在终端运行：
-
+uv sync --dev
 ```bash
 uv sync --dev
+```
+下载缓慢可以切换国内源
+```bash
+UV_DEFAULT_INDEX=https://pypi.tuna.tsinghua.edu.cn/simple uv sync --dev
 ```
 
 4. 在 PyCharm 中进入 `Settings/Preferences -> Project -> Python Interpreter`。
@@ -174,7 +178,7 @@ uv pip install torch torchvision torchaudio
 
 ### Ubuntu + 3080Ti
 
-Ubuntu 3080Ti 是主实验机器。请到 PyTorch 官方安装页面选择：
+Ubuntu 3080Ti 是主实验机器。到 PyTorch 官方安装页面选择：
 
 ```text
 OS: Linux
