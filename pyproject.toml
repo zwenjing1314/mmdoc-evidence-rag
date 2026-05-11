@@ -41,6 +41,7 @@ dev = [
   "ipykernel",
   "jupyterlab",
   "mypy",
+  "package-name>=0.1",
   "pre-commit",
   "pytest",
   "pytest-cov",

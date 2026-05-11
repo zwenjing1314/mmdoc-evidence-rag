@@ -1,17 +1,17 @@
-experiment_name: demo_page_region
-dataset: demo
+experiment_name: demo_page_region  # 实验名称
+dataset: demo  # 使用的数据集
 retriever:
-  type: page_region
-  page_retriever: dense_page
-  region_retriever: layout_node
-  page_top_k: 3
-  region_top_k: 3
+  type: page_region   # 检索器类型：页面+区域两级检索
+  page_retriever: dense_page  # 页面检索器：密集向量检索
+  region_retriever: layout_node  # 区域检索器：布局感知节点检索
+  page_top_k: 3  # 页面检索返回前3个页面
+  region_top_k: 3  # 每个页面内返回前3个区域
   fusion:
-    method: rrf
+    method: rrf  # 融合方法：倒数排名融合
 evaluation:
-  metrics:
-    - page_recall
-    - region_hit
-    - mrr
-    - ndcg
-output_dir: runs/retrieval/demo_page_region
+  metrics:  # 评估指标
+    - page_recall  # 页面召回率
+    - region_hit  # 区域命中率
+    - mrr  # 平均倒数排名
+    - ndcg  # 归一化折损累计增益
+output_dir: runs/retrieval/demo_page_region  # 输出目录

@@ -1,0 +1,12 @@
+experiment_name: cn_dense_page
+dataset: cn_annual_reports
+retriever:
+  type: dense_page
+  encoder: BAAI/bge-m3
+  top_k: [1, 5, 10]
+evaluation:
+  metrics:
+    - page_recall
+    - mrr
+    - ndcg
+output_dir: runs/retrieval/cn_dense_page

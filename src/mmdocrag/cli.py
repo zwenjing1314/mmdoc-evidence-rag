@@ -7,7 +7,7 @@ import typer
 from rich.console import Console
 from rich.table import Table
 
-from mmdocrag.datasets import prepare_dataset
+from mmdocrag.datasets import build_cn_annotations, prepare_dataset
 from mmdocrag.evaluation import evaluate_run
 from mmdocrag.exporting import export_demo_table
 from mmdocrag.paths import resolve_project_path
@@ -42,6 +42,20 @@ def prepare(
     if result.documents == 0:
         console.print("[yellow]No usable data was prepared. For a smoke test, run:[/yellow]")
         console.print("[bold]uv run mdr prepare --dataset demo[/bold]")
+
+
+@app.command("build-cn-annotations")
+def build_cn_annotations_command(
+    questions_per_doc: Annotated[
+        int, typer.Option(help="Target QA rows per annual report.")
+    ] = 8,
+    limit_docs: Annotated[
+        int | None, typer.Option(help="Optional PDF limit for quick annotation generation.")
+    ] = None,
+) -> None:
+    """Build V2 Chinese annual report QA annotations from local PDFs."""
+    output = build_cn_annotations(questions_per_doc=questions_per_doc, limit_docs=limit_docs)
+    console.print(f"[green]Chinese annual report V2 annotations written to:[/green] {output}")
 
 
 @app.command()

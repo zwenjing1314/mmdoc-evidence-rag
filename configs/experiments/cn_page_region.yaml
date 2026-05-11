@@ -1,0 +1,17 @@
+experiment_name: cn_page_region
+dataset: cn_annual_reports
+retriever:
+  type: page_region
+  page_retriever: dense_page
+  region_retriever: layout_node
+  page_top_k: 10
+  region_top_k: 5
+  fusion:
+    method: rrf
+evaluation:
+  metrics:
+    - page_recall
+    - region_hit
+    - mrr
+    - ndcg
+output_dir: runs/retrieval/cn_page_region
