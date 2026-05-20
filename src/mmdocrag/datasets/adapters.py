@@ -62,6 +62,7 @@ PERCENT_PATTERN = re.compile(r"-?\d+(?:\.\d+)?%")
 UNIT_PATTERN = re.compile(r"单位[：:]\s*([人民币元万元亿元百万元千元]+)")
 
 
+# 不同数据集选择不同的处理函数
 def prepare_dataset(dataset: str, limit_docs: int | None = None) -> PrepareResult:
     if dataset == "demo":
         return prepare_demo(limit_docs=limit_docs)
@@ -224,8 +225,8 @@ def prepare_mmdocir(limit_docs: int | None = None) -> PrepareResult:
 
 def prepare_cn_annual_reports(limit_docs: int | None = None) -> PrepareResult:
     dataset = "cn_annual_reports"
-    raw_dir = data_root() / "raw" / dataset
-    pdf_dir = raw_dir / "pdfs"
+    raw_dir = data_root() / "raw" / dataset  # 中文年报原始数据上一级目录路径
+    pdf_dir = raw_dir / "pdfs"  # 中文年报原始数据路径
     processed_dir = data_root() / "processed" / dataset
     pdfs = sorted(path for path in pdf_dir.glob("*.pdf") if path.is_file())
     if limit_docs is not None:
@@ -260,7 +261,7 @@ def prepare_cn_annual_reports(limit_docs: int | None = None) -> PrepareResult:
     pages: list[PageRecord] = []
     nodes: list[EvidenceNode] = []
     for pdf_index, pdf in enumerate(pdfs, start=1):
-        doc_id = pdf.stem
+        doc_id = pdf.stem  # 获取 pdf 文件去除 .pdf 后的文件名作为 doc_id 字段
         extracted_pages = _extract_pdf_page_items(pdf)
         page_count = len(extracted_pages)
         documents.append(
@@ -472,11 +473,11 @@ def _extract_pdf_page_items(path: Path) -> list[dict[str, Any]]:
         import fitz
 
         items: list[dict[str, Any]] = []
-        with fitz.open(path) as doc:
-            for page in doc:
-                blocks = []
-                for block in page.get_text("blocks") or []:
-                    if len(block) < 5:
+        with fitz.open(path) as doc:  # 打开 PDF 文档
+            for page in doc:  # 第1层循环：遍历每一页
+                blocks = []  # 当前页面的文本块列表
+                for block in page.get_text("blocks") or []:  # ← 第2层循环：遍历每个文本块
+                    if len(block) < 5:  # 字段小于等于 5，则忽略
                         continue
                     text = _clean_text(str(block[4]))
                     if not text:
@@ -503,7 +504,11 @@ def _extract_pdf_pages(path: Path) -> list[str]:
         return []
 
 
+# 这是一个文本标准化函数，用于清理和规范化从 PDF 提取的文本
 def _clean_text(text: str) -> str:
+    # (text or "") - 空值保护
+    # .replace("\u3000", " ") - 用半角空格（ASCII 32）替换全角空格
+    # 这里调用的是无参数的 split()
     return " ".join((text or "").replace("\u3000", " ").split())
 
 

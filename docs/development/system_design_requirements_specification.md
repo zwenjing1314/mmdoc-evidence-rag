@@ -100,6 +100,155 @@
 - 不把端到端问答模型训练作为主要贡献；
 - 不以构建大而全的工业 RAG 平台作为主要目标。
 
+### 3.5 实验创新点
+
+根据开题后导师意见，本文实验系统的创新点应从“大而全的 RAG 系统组合”收缩为围绕证据检索和证据可信性的三个递进问题：
+
+```text
+证据如何组织
+  -> 如何检索最小充分证据集
+  -> 如何验证证据是否足够、答案是否被支持、引用是否一致
+```
+
+#### 创新点一：构建面向检索、引用与验证闭环的轻量级多粒度证据图表示
+
+传统固定长度文本切块容易破坏长文档中的页面结构、章节层级、表格归属关系和证据来源信息。本文不再仅将 PDF 切分为普通文本 chunk，而是将页面、章节、段落、表格块、表格行和图表区域等文档元素统一建模为 `evidence node`，并显式记录包含关系、阅读顺序、表格归属、标题层级和来源关系，形成轻量级证据图结构。
+
+该创新点的核心不在于重新提出复杂图神经网络，而在于构建一种能够同时服务于检索、引用和验证的证据组织方式。每个证据节点保留页码、区域坐标、元素类型、文本内容、层级关系和来源信息，使文档内容从普通文本片段转化为可定位、可引用、可验证的证据单元。
+
+需要通过实验回答的问题：
+
+- 页面级、段落级、表格块级、表格行级等不同粒度对检索效果有何影响；
+- 表格行级证据是否更有利于财务数值问题；
+- 证据图中的包含关系、阅读顺序和表格归属关系是否有助于后续证据集选择；
+- 引用到具体页码和证据节点是否能提升答案可复核性。
+
+对应实验：
+
+- 粒度消融实验；
+- page-only vs paragraph-node vs table-row-node；
+- single-node retrieval vs graph-aware candidate expansion；
+- citation accuracy / region hit 分析。
+
+#### 创新点二：设计证据充分性感知的页面—区域—证据集层次化检索与重排序方法
+
+现有 Page→Region 检索往往关注单个候选节点的相似度排序，但真实长文档问答经常需要多个证据共同支撑回答。例如财务数值问题不仅需要数值，还需要指标名称、年份、单位和来源页码；文本解释类问题不仅需要相关句子，还需要关键实体、条件和结论。
+
+因此，本文的核心方法不是只检索单个最相似节点，而是面向可回答性选择 `minimum sufficient evidence set`，即最小充分证据集。
+
+本文对“最小充分证据集”的定义如下：
+
+- **充分**：候选证据集能够覆盖回答问题所需的关键证据要素；
+- **最小**：在满足证据要素覆盖的前提下，尽量减少冗余页面和冗余节点数量。
+
+该方法采用层次化检索流程：
+
+```text
+页面级候选召回
+  -> 候选页面内区域节点检索
+  -> 证据要素覆盖度计算
+  -> 候选 evidence set 组合
+  -> 充分性与冗余度联合重排序
+```
+
+候选 evidence set 的得分应综合以下信号：
+
+- 语义相关性；
+- 页面召回得分；
+- 节点检索得分；
+- 节点类型匹配；
+- 版面位置先验；
+- 问题要素覆盖度；
+- 单位一致性；
+- 数值匹配；
+- 冗余惩罚。
+
+建议评分形式：
+
+```text
+EvidenceSetScore(q, S) =
+  α · SemanticScore(q, S)
++ β · PagePrior(q, S)
++ γ · TypeMatch(q, S)
++ δ · SlotCoverage(q, S)
++ η · UnitConsistency(q, S)
+- λ · Redundancy(S)
+```
+
+其中：
+
+- `q` 表示问题；
+- `S` 表示候选证据集；
+- `SlotCoverage` 表示证据集是否覆盖回答问题所需证据要素；
+- `Redundancy` 表示证据集冗余程度。
+
+需要通过实验回答的问题：
+
+- Page→Region 是否优于直接全局区域检索；
+- 页面召回错误和区域定位错误分别占多大比例；
+- oracle-page→region 能否显著优于 predicted-page→region；
+- evidence set 是否优于 single-node；
+- 证据充分性特征是否真正提升 Region Hit、Evidence Set Recall 和答案支持性。
+
+对应实验：
+
+- page-only；
+- global-region；
+- oracle-page→region；
+- predicted-page→region；
+- single-node vs evidence-set；
+- 去掉 slot coverage 的消融；
+- 去掉 unit consistency 的消融；
+- 去掉 redundancy penalty 的消融。
+
+#### 创新点三：形成面向证据充分性、答案支持性与引用一致性的分层可信验证机制
+
+普通 RAG 往往只关注生成答案是否看似正确，但文档问答场景还需要判断：
+
+- 检索证据是否足以回答问题；
+- 生成答案是否被证据支持；
+- 答案引用是否指向正确页码、区域或表格行；
+- 当证据不足或证据冲突时是否应该拒答。
+
+本文将可信验证拆分为三个层次：
+
+1. **生成前证据充分性验证**：判断 evidence set 是否覆盖回答问题所需的关键证据要素；
+2. **生成后答案支持性验证**：判断答案中的关键 claim 是否能被证据支持；
+3. **引用一致性验证**：判断答案引用是否指向正确页码、区域或表格证据。
+
+不同问题类型采用不同验证策略：
+
+- 数值型问题：验证指标、年份、单位和数值是否一致；
+- 表格型问题：验证“指标—年份—单位—数值”四元组；
+- 文本型问题：结合证据覆盖度、NLI 或 LLM verifier 判断支持性；
+- 不可回答问题：结合检索置信度、证据要素覆盖度和 verifier 判断是否拒答。
+
+最终输出状态建议：
+
+- `supported`
+- `partially_supported`
+- `insufficient`
+- `conflict`
+- `citation_mismatch`
+- `unanswerable`
+
+需要通过实验回答的问题：
+
+- 证据充分性判断能否减少无依据生成；
+- 引用一致性验证能否发现错误引用；
+- 拒答机制能否降低不可回答问题误答率；
+- 规则验证与 LLM verifier 结合是否比单独使用 LLM-as-judge 更稳定。
+
+### 3.6 创新点与开发任务对应关系
+
+| 创新点 | 必须开发的功能 | 必须完成的实验 |
+|---|---|---|
+| 轻量级多粒度证据图 | evidence node、evidence edge、父子关系、阅读顺序、表格归属 | 粒度消融、节点类型对比、引用准确性分析 |
+| 最小充分证据集检索 | global-region、oracle-page→region、evidence set、slot coverage、unit consistency、redundancy penalty | page-only、global-region、oracle-page→region、single-node vs evidence-set、充分性特征消融 |
+| 分层可信验证 | evidence cards、生成前充分性验证、答案支持性验证、引用一致性验证、拒答状态 | supported/insufficient/conflict/unanswerable 统计、拒答实验、错误分析 |
+
+开发优先级应以第二个创新点为中心，即优先完成“证据充分性感知的页面—区域—证据集层次化检索与重排序方法”。第一个创新点是数据和结构基础，第三个创新点是下游验证闭环。
+
 ## 4. 用户角色
 
 ### 4.1 研究者
@@ -1194,6 +1343,185 @@ output_dir: runs/verification/cn_verification
 10. 图表区域和视觉检索尚未形成实验结果。
 
 ## 13. 后续开发路线
+
+### 13.0 开题后核心必须完成事项
+
+开题后开发不应继续扩展“大而全”的系统功能，而应优先围绕论文主贡献完成一条可验证的实验主线：
+
+```text
+轻量级证据图
+  -> 页面—区域检索 baseline
+  -> 最小充分证据集选择
+  -> 证据充分性消融实验
+  -> 分层可信验证与拒答
+```
+
+#### 必须完成 A：重新跑通并固化已有实验
+
+目的：
+
+确认当前代码和数据仍然可复现，并作为后续实验基准。
+
+必须完成：
+
+1. 重新运行 `prepare cn_annual_reports`；
+2. 重新运行 `BM25-page`；
+3. 重新运行 `Dense-page`；
+4. 重新运行 `Page→Region`；
+5. 重新导出指标表；
+6. 固化当前 baseline 结果，作为后续对比起点。
+
+验收标准：
+
+- 四个 parquet 标准表可重新生成；
+- 三类已有检索实验可运行；
+- `metrics.json`、`predictions.parquet`、`summary.md` 可正常输出；
+- 指标与历史结果差异在可解释范围内。
+
+#### 必须完成 B：补齐关键检索 baseline
+
+目的：
+
+回答导师指出的“当前 Page→Region 只能说明流程可跑通，缺少关键对照”的问题。
+
+必须完成：
+
+1. `global-region`：直接在所有 evidence nodes 上检索，不经过页面召回；
+2. `oracle-page→region`：使用人工标注的正确页面，只评价区域定位能力；
+3. `predicted-page→region`：使用模型预测页面，再进行区域定位；
+4. `single-node retrieval`：只返回单个最相关节点；
+5. `evidence-set retrieval`：返回一组能够覆盖问题要素的证据节点。
+
+验收标准：
+
+- 每个 baseline 都有独立配置文件；
+- 每个 baseline 都能输出统一格式的 `predictions.parquet`；
+- 评价脚本能计算 Page Recall、Region Hit、Evidence Set Recall、MRR 和 nDCG；
+- 能区分页面召回错误和区域定位错误。
+
+#### 必须完成 C：实现证据要素与充分性特征
+
+目的：
+
+把论文主创新从“普通 Page→Region 检索”推进到“证据充分性感知检索”。
+
+必须完成的问题类型：
+
+| 问题类型 | 必要证据要素 |
+|---|---|
+| 财务数值类 | 指标、年份、单位、数值、来源页 |
+| 表格型问题 | 指标、列名/年份、单位、单元格值 |
+| 文本解释类 | 关键实体、条件、原因或结论 |
+| 风险描述类 | 风险名称、风险描述、来源章节 |
+
+必须实现的特征：
+
+1. `type_match`：问题类型与节点类型是否匹配；
+2. `slot_coverage`：证据集是否覆盖必要证据要素；
+3. `unit_consistency`：单位是否一致；
+4. `numeric_match`：数值是否匹配；
+5. `section_prior`：证据是否位于合理章节；
+6. `redundancy_penalty`：证据集是否过度冗余。
+
+验收标准：
+
+- 每条 query 能得到问题类型；
+- 每个候选节点或 evidence set 能输出充分性特征；
+- 特征分数能写入结果 metadata；
+- 可导出案例查看每个 evidence set 为什么被选中。
+
+#### 必须完成 D：实现最小充分证据集选择
+
+目的：
+
+回答“系统不是只检索最相似片段，而是检索能够支撑回答的证据组合”。
+
+必须完成：
+
+1. 从候选节点中生成候选 evidence set；
+2. 计算 evidence set 的语义相关性、要素覆盖度和冗余度；
+3. 选择 Top-k evidence sets；
+4. 保存 `evidence_sets.parquet`；
+5. 支持 `single-node vs evidence-set` 对比实验。
+
+验收标准：
+
+- evidence set 至少包含 `query_id`、`node_ids`、`page_ids`、`sufficiency_score`、`redundancy_score`、`set_score`；
+- 能说明每个 evidence set 覆盖了哪些证据要素；
+- 能评价 gold evidence node 是否被 evidence set 覆盖；
+- 能证明 evidence set 相比 single-node 是否更有利于答案支持性。
+
+#### 必须完成 E：完成消融实验和错误分析
+
+目的：
+
+证明各个充分性特征是否真的有效，避免只做系统展示。
+
+必须完成的消融：
+
+1. 完整方法；
+2. 去掉 `page_score`；
+3. 去掉 `type_match`；
+4. 去掉 `slot_coverage`；
+5. 去掉 `unit_consistency`；
+6. 去掉 `redundancy_penalty`；
+7. single-node 替代 evidence-set；
+8. predicted-page 替代 oracle-page。
+
+必须完成的错误分析：
+
+- 页面没召回；
+- 页面召回正确但区域定位错误；
+- 区域节点切分不合理；
+- 表格行没抽准；
+- 单位识别错误；
+- evidence set 缺少关键要素；
+- 证据冗余过多；
+- gold 标注不完善。
+
+验收标准：
+
+- 有完整对比表；
+- 有消融实验表；
+- 有错误类型统计；
+- 有 5-10 个典型案例分析；
+- 能回答“方法提升来自哪个模块”。
+
+#### 必须完成 F：最小可信验证闭环
+
+目的：
+
+不追求第一时间完成复杂生成系统，但必须让检索结果和可信验证衔接起来。
+
+必须完成：
+
+1. evidence cards 构造；
+2. 生成前证据充分性判断；
+3. 数值和单位一致性规则验证；
+4. 引用页码和节点一致性验证；
+5. `supported`、`insufficient`、`conflict`、`citation_mismatch` 状态输出；
+6. 对部分问题进行拒答实验。
+
+验收标准：
+
+- 对财务数值类问题能自动判断数值和单位是否被证据支持；
+- 对证据不足样本能输出 `insufficient`；
+- 对引用错误样本能输出 `citation_mismatch`；
+- 能导出可信验证统计表。
+
+#### 暂缓实现事项
+
+以下内容不作为开题后第一阶段开发重点：
+
+1. 大规模 ColPali / ColQwen 视觉检索；
+2. ViDoRe V3 全量实验；
+3. OmniDocBench 解析评测；
+4. 完整 LangChain 工程化 Agent；
+5. 大规模 LLM verifier 自动评测；
+6. 完整图表数值抽取；
+7. 复杂前端系统。
+
+这些内容可以作为论文后期扩展、案例分析或未来工作，不应影响检索主线完成。
 
 ### 13.1 第一轮：检索主线增强
 

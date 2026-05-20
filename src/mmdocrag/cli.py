@@ -3,7 +3,7 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Annotated
 
-import typer
+import typer  # 现代、基于类型提示的 CLI 框架
 from rich.console import Console
 from rich.table import Table
 
@@ -13,10 +13,12 @@ from mmdocrag.exporting import export_demo_table
 from mmdocrag.paths import resolve_project_path
 from mmdocrag.retrieval import run_retrieval
 
+# 进行实例创建
 app = typer.Typer(help="Multi-modal document evidence retrieval experiments.")
 console = Console()
 
 
+# 命令注册过程
 @app.command()
 def prepare(
     dataset: Annotated[
@@ -31,7 +33,8 @@ def prepare(
     table = Table(title="Prepare Result")
     table.add_column("Field")
     table.add_column("Value")
-    table.add_row("dataset", result.dataset)
+    table.add_row("[green]dataset[/green]", result.dataset)
+    # table.add_row("dataset", result.dataset)
     table.add_row("processed_dir", str(result.processed_dir))
     table.add_row("documents", str(result.documents))
     table.add_row("pages", str(result.pages))
