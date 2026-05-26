@@ -21,9 +21,9 @@ def run_retrieval(config_path: Path) -> Path:
     retriever_type = str(retriever.get("type", "bm25_page"))
     experiment_name = str(config.get("experiment_name", f"{dataset}_{retriever_type}"))
     processed_dir = data_root() / "processed" / dataset
-    _, pages, nodes, queries = read_processed_dataset(processed_dir)
-    output_root = resolve_project_path(config.get("output_dir", f"runs/retrieval/{experiment_name}"))
-    run_dir = output_root / datetime.now().strftime("%Y%m%d_%H%M%S")
+    _, pages, nodes, queries = read_processed_dataset(processed_dir)  # 读取数据
+    output_root = resolve_project_path(config.get("output_dir", f"runs/retrieval/{experiment_name}"))  # 输出目录
+    run_dir = output_root / datetime.now().strftime("%Y%m%d_%H%M%S")  # 根据时间创建新文件夹放到 output_roo t文件夹下
     run_dir.mkdir(parents=True, exist_ok=True)
 
     if retriever_type == "bm25_page":
@@ -64,6 +64,7 @@ def run_retrieval(config_path: Path) -> Path:
     return run_dir
 
 
+# 返回yaml文件中top_k中最大值
 def max_top_k(retriever: dict[str, Any]) -> int:
     value = retriever.get("top_k", 10)
     if isinstance(value, list):

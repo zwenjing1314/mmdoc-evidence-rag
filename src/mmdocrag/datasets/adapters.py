@@ -227,7 +227,7 @@ def prepare_cn_annual_reports(limit_docs: int | None = None) -> PrepareResult:
     dataset = "cn_annual_reports"
     raw_dir = data_root() / "raw" / dataset  # 中文年报原始数据上一级目录路径
     pdf_dir = raw_dir / "pdfs"  # 中文年报原始数据路径
-    processed_dir = data_root() / "processed" / dataset
+    processed_dir = data_root() / "processed" / dataset  # 处理后的中文年报数据
     pdfs = sorted(path for path in pdf_dir.glob("*.pdf") if path.is_file())
     if limit_docs is not None:
         pdfs = pdfs[:limit_docs]
@@ -257,12 +257,16 @@ def prepare_cn_annual_reports(limit_docs: int | None = None) -> PrepareResult:
         )
         return PrepareResult(dataset, processed_dir, 0, 0, 0, 0, "Chinese annual report PDFs not found; annotation template generated.")
 
-    documents: list[DocumentRecord] = []
-    pages: list[PageRecord] = []
-    nodes: list[EvidenceNode] = []
+    documents: list[DocumentRecord] = []  # 文档列表
+    pages: list[PageRecord] = []  # 页面列表
+    nodes: list[EvidenceNode] = []  # 节点列表
     for pdf_index, pdf in enumerate(pdfs, start=1):
         doc_id = pdf.stem  # 获取 pdf 文件去除 .pdf 后的文件名作为 doc_id 字段
-        extracted_pages = _extract_pdf_page_items(pdf)
+        # extracted_pages 返回的是
+        #     items = [
+        #     {第1页数据},
+        #     {第2页数据}]
+        extracted_pages = _extract_pdf_page_items(pdf)  # 获取所有页面的内容，
         page_count = len(extracted_pages)
         documents.append(
             DocumentRecord(
@@ -278,7 +282,7 @@ def prepare_cn_annual_reports(limit_docs: int | None = None) -> PrepareResult:
         for page_index, page_item in enumerate(extracted_pages, start=1):
             page_id = f"{doc_id}_p{page_index}"
             page_text = str(page_item.get("text") or "")
-            normalized_text = _clean_text(page_text)
+            normalized_text = _clean_text(page_text)  # 清理和规范化从 PDF 提取的文本
             pages.append(
                 PageRecord(
                     doc_id=doc_id,
@@ -286,10 +290,20 @@ def prepare_cn_annual_reports(limit_docs: int | None = None) -> PrepareResult:
                     page_index=page_index,
                     page_text=normalized_text,
                     ocr_text=normalized_text,
-                    metadata={"source_pdf": str(pdf), "parser": "pymupdf"},
+                    # 是一个字典，用于存储额外的、可选的元数据
+                    metadata={"source_pdf": str(pdf),   # 来源 PDF 文件的完整路径
+                              "parser": "pymupdf"}  # 使用的解析器名称
+                    ,
                 )
             )
             nodes.extend(
+                # _build_cn_page_nodes() 返回一个临时列表
+                #   page1_nodes = [node_p1_001, node_p1_002, node_p1_003]
+                # extend 将这个列表中的每个元素逐个添加
+                #   等价于：
+                #   nodes.append(node_p1_001)
+                #   nodes.append(node_p1_002)
+                #   nodes.append(node_p1_003)
                 _build_cn_page_nodes(
                     doc_id=doc_id,
                     page_id=page_id,
@@ -301,6 +315,12 @@ def prepare_cn_annual_reports(limit_docs: int | None = None) -> PrepareResult:
                 )
             )
     nodes_by_page: dict[str, list[EvidenceNode]] = {}
+    """
+    等价于
+    if node.page_id not in nodes_by_page:
+        nodes_by_page[node.page_id] = []
+        nodes_by_page[node.page_id].append(node)
+    """
     for node in nodes:
         nodes_by_page.setdefault(node.page_id, []).append(node)
     queries = _load_cn_queries(raw_dir, dataset, nodes_by_page=nodes_by_page)
@@ -476,7 +496,7 @@ def _extract_pdf_page_items(path: Path) -> list[dict[str, Any]]:
         with fitz.open(path) as doc:  # 打开 PDF 文档
             for page in doc:  # 第1层循环：遍历每一页
                 blocks = []  # 当前页面的文本块列表
-                for block in page.get_text("blocks") or []:  # ← 第2层循环：遍历每个文本块
+                for block in page.get_text("blocks") or []:  # ← 第2层循环：遍历每个文本块  block 一般返回7个字段 x1, y1, x2, y2, text, block_no, block_type
                     if len(block) < 5:  # 字段小于等于 5，则忽略
                         continue
                     text = _clean_text(str(block[4]))
@@ -521,32 +541,41 @@ def _build_cn_page_nodes(
     blocks: list[dict[str, Any]],
     reading_order_base: int,
 ) -> list[EvidenceNode]:
-    raw_chunks = _block_chunks(blocks) or _fallback_text_chunks(text)
+    raw_chunks = _block_chunks(blocks) or _fallback_text_chunks(text)  # 将 PyMuPDF 提取的 blocks 列表转换为简化的 chunk 字典列表。 当无法获取 PDF blocks 时，基于文本规则将纯文本切分成 chunks
     chunks: list[dict[str, Any]] = []
     seen: set[str] = set()
     for chunk in raw_chunks:
+        # 清理文本
         chunk_text = _clean_text(str(chunk.get("text") or ""))
         if not chunk_text:
-            continue
+            continue  # 跳过空文本
+        # 提取财务指标行（细粒度）
         for metric_chunk in _metric_row_chunks(chunk_text):
+            # 生成唯一标识（标准化 + 截断）
             key = _normalize_for_match(metric_chunk["text"])[:180]
+            # key = "营业收入233,432,768,960.43343,176,440,712.96-31.98%"
+            # 检查key是否已存在
             if key and key not in seen:
                 seen.add(key)
+                # **metric_chunk 展开 {"text": ..., "node_type": "table_row"}
                 chunks.append({**metric_chunk, "bbox": chunk.get("bbox")})
-        key = _normalize_for_match(chunk_text)[:220]
+        # 处理普通文本块（粗粒度）
+        key = _normalize_for_match(chunk_text)[:220]  # 比财务指标的 180 字符更长. 因为普通段落的多样性更高，需要更长的指纹来确保唯一性
         if len(chunk_text) >= 12 and key not in seen:
             seen.add(key)
             chunks.append(
                 {
-                    "text": chunk_text[:900],
+                    "text": chunk_text[:900],  # 限制长度
                     "node_type": "table_block" if _looks_like_table_block(chunk_text) else "paragraph",
                     "bbox": chunk.get("bbox"),
                 }
             )
 
+    # 前面的切分逻辑没有产生任何 chunks（例如页面完全是空白的），则创建一个默认的节点，避免页面没有任何证据节点
     if not chunks:
         chunks.append({"text": _clean_text(text) or page_id, "node_type": "paragraph", "bbox": None})
 
+    # 是将切分好的文本片段（chunks）转换为标准的证据节点（EvidenceNode）对象，这是页面处理的最后一步
     unit_candidates = _unit_candidates(_clean_text(text))
     nodes: list[EvidenceNode] = []
     for index, chunk in enumerate(chunks, start=1):
@@ -571,7 +600,7 @@ def _build_cn_page_nodes(
         )
     return nodes
 
-
+# 将 PyMuPDF 提取的 blocks 列表转换为简化的 chunk 字典列表
 def _block_chunks(blocks: list[dict[str, Any]]) -> list[dict[str, Any]]:
     return [
         {"text": block.get("text", ""), "bbox": block.get("bbox")}
@@ -580,28 +609,57 @@ def _block_chunks(blocks: list[dict[str, Any]]) -> list[dict[str, Any]]:
     ]
 
 
+# 当无法获取 PDF blocks 时，基于文本规则将纯文本切分成 chunks
 def _fallback_text_chunks(text: str) -> list[dict[str, Any]]:
+    # 步骤1：按行分割并清理
     lines = [_clean_text(line) for line in (text or "").splitlines()]
-    lines = [line for line in lines if line]
+    lines = [line for line in lines if line]  # 去除空行
     chunks: list[dict[str, Any]] = []
-    current: list[str] = []
+    current: list[str] = []  # 累积普通文本行
     for line in lines:
-        is_financial_line = _contains_financial_keyword(line) and bool(NUMBER_PATTERN.search(line))
+        # 步骤2：检测是否是财务数据行
+        is_financial_line = _contains_financial_keyword(line) and bool(NUMBER_PATTERN.search(line))  # 子串关键字检查和数字检测，同时满足两个条件才认为是财务数据行
         if is_financial_line:
+            # 步骤3a：如果是财务行，先保存之前累积的普通文本
             if current:
                 chunks.append({"text": " ".join(current), "bbox": None})
                 current = []
+            # 步骤3b：财务行单独成为一个 chunk
             chunks.append({"text": line, "bbox": None})
             continue
+        # 步骤4：普通行累积到 current
         current.append(line)
+        # 步骤5：如果累积文本超过 260 字符，切分为一个 chunk
         if len(" ".join(current)) >= 260:
             chunks.append({"text": " ".join(current), "bbox": None})
             current = []
+    # 步骤6：处理剩余的文本
     if current:
         chunks.append({"text": " ".join(current), "bbox": None})
     return chunks
 
+# 从文本中提取财务指标数据行
+"""
+这个函数会从 chunk_text 中提取所有包含财务关键词的数据行
+示例输入：
+chunk_text = '''
+主要会计数据
+营业收入 233,432,768,960.43 343,176,440,712.96 -31.98%
+净利润 88,556,470,495.64 49,478,429,211.96 -78.98%
+'''
 
+输出：
+metric_chunks = [
+    {
+        "text": "营业收入 233,432,768,960.43 343,176,440,712.96 -31.98%",
+        "node_type": "table_row"
+    },
+    {
+        "text": "净利润 88,556,470,495.64 49,478,429,211.96 -78.98%",
+        "node_type": "table_row"
+    }
+]
+"""
 def _metric_row_chunks(text: str) -> list[dict[str, str]]:
     chunks = []
     for keyword in FINANCIAL_KEYWORDS:
@@ -611,26 +669,29 @@ def _metric_row_chunks(text: str) -> list[dict[str, str]]:
         window = text[position : position + 360]
         if not NUMBER_PATTERN.search(window):
             continue
-        chunks.append({"text": window, "node_type": "table_row"})
+        chunks.append({"text": window, "node_type": "table_row"})  # 创建财务数据行 chunk
     return chunks
 
 
+# 进行表格块判断检查
 def _looks_like_table_block(text: str) -> bool:
     numbers = NUMBER_PATTERN.findall(text)
+    # 包含 ≥3 个数字 → 可能是表格。 包含财务关键词 → 可能是财务表格
     return len(numbers) >= 3 or _contains_financial_keyword(text)
 
 
 def _contains_financial_keyword(text: str) -> bool:
-    return any(keyword in text for keyword in FINANCIAL_KEYWORDS)
+    return any(keyword in text for keyword in FINANCIAL_KEYWORDS)  # 字符串 in 字符串 → 子串检查
 
 
+# 从整页文本中提取可能的数值单位（如"元"、"万元"、"亿元"等），用于后续理解财务数据的量级
 def _unit_candidates(text: str) -> list[str]:
     units = []
     for match in UNIT_PATTERN.finditer(text):
         unit = match.group(1)
         if unit not in units:
             units.append(unit)
-    return units[:5]
+    return units[:5]  # 最多返回5个单位
 
 
 def _build_cn_doc_annotation_rows(
@@ -949,6 +1010,7 @@ def _clip_text(text: str, needle: str, before: int = 80, after: int = 260) -> st
 def _load_cn_queries(
     raw_dir: Path, dataset: str, nodes_by_page: dict[str, list[EvidenceNode]] | None = None
 ) -> list[QueryRecord]:
+    # 这个函数的作用是从 CSV 或 Excel 文件中加载中文年报的问答标注数据，并将其转换为标准的 QueryRecord 对象列表，同时自动匹配证据节点
     candidates = [
         raw_dir / "qa_annotations_v2_reviewed.csv",
         raw_dir / "qa_annotations_v2_reviewed.xlsx",
@@ -960,13 +1022,14 @@ def _load_cn_queries(
     nodes_by_page = nodes_by_page or {}
     for candidate in candidates:
         if not candidate.exists():
-            continue
+            continue  # 文件不存在，跳过
+        # 找到第一个存在的文件，读取并处理
         frame = pl.read_excel(candidate) if candidate.suffix == ".xlsx" else pl.read_csv(candidate)
         queries = []
-        for idx, row in enumerate(frame.to_dicts(), start=1):
-            doc_id = str(row.get("doc_id") or "")
-            pages = str(row.get("evidence_pages") or "")
-            evidence_page_ids = [item.strip() for item in pages.split(";") if item.strip()]
+        for idx, row in enumerate(frame.to_dicts(), start=1):  # 转换为字典列表并进行遍历
+            doc_id = str(row.get("doc_id") or "")  # 提取 doc_id
+            pages = str(row.get("evidence_pages") or "")  # 解析 evidence_pages
+            evidence_page_ids = [item.strip() for item in pages.split(";") if item.strip()]  # 因为一个问题的证据可能分布在多个页面上，用分号分隔。
             evidence_node_ids, node_match_status = _match_cn_evidence_nodes(row, evidence_page_ids, nodes_by_page)
             metadata = {
                 key: value
@@ -1006,61 +1069,73 @@ def _match_cn_evidence_nodes(
     evidence_page_ids: list[str],
     nodes_by_page: dict[str, list[EvidenceNode]],
 ) -> tuple[list[str], str]:
+    # 步骤 1：收集候选节点并评分
     scored: list[tuple[float, EvidenceNode]] = []
-    for page_id in evidence_page_ids:
-        for node in nodes_by_page.get(page_id, []):
-            score = _score_node_for_annotation(row, node)
+    for page_id in evidence_page_ids:  # 遍历 CSV 标注的页面
+        for node in nodes_by_page.get(page_id, []):  # 获取该页面上的所有节点
+            score = _score_node_for_annotation(row, node)  # 计算匹配分数
             if score > 0:
                 scored.append((score, node))
+    # 步骤 2：排序并选择 Top 3
     if scored:
-        ordered = sorted(scored, key=lambda item: (-item[0], item[1].reading_order))
+        ordered = sorted(scored, key=lambda item: (-item[0], item[1].reading_order))  # 按分数倒序排序，如果分数相同则按阅读顺序排序
         node_ids = []
         for _, node in ordered[:3]:
             if node.node_id not in node_ids:
                 node_ids.append(node.node_id)
         return node_ids, "matched"
 
+    # 步骤 3：Fallback 策略（如果没找到匹配）
+    # 如果没有评分 > 0 的节点
     fallback_ids = []
     for page_id in evidence_page_ids:
         nodes = nodes_by_page.get(page_id, [])
         if nodes:
-            fallback_ids.append(nodes[0].node_id)
+            fallback_ids.append(nodes[0].node_id)  # 取每页的第一个节点
     return fallback_ids, "fallback" if fallback_ids else "missing"
 
 
 def _score_node_for_annotation(row: dict[str, Any], node: EvidenceNode) -> float:
-    text = _normalize_for_match(node.text)
-    score = 0.0
-    raw_value = _normalize_for_match(str(row.get("raw_answer_value") or ""))
-    answer = _normalize_for_match(str(row.get("answer") or ""))
-    question = str(row.get("question") or "")
-    value_evidence = _normalize_for_match(str(row.get("value_evidence_text") or ""))
-    unit_evidence = _normalize_for_match(str(row.get("unit_evidence_text") or ""))
-    evidence_text = _normalize_for_match(str(row.get("evidence_text") or ""))
+    text = _normalize_for_match(node.text)  # 节点文本（标准化后）
+    score = 0.0  # 初始分数为 0
+    # 从 CSV 行（row）中提取信息并标准化
+    raw_value = _normalize_for_match(str(row.get("raw_answer_value") or ""))  # 原始数值
+    answer = _normalize_for_match(str(row.get("answer") or ""))  # 最终答案
+    question = str(row.get("question") or "")  # 问题原文
+    value_evidence = _normalize_for_match(str(row.get("value_evidence_text") or ""))  # 数值证据片段
+    unit_evidence = _normalize_for_match(str(row.get("unit_evidence_text") or ""))  # 单位证据片段
+    evidence_text = _normalize_for_match(str(row.get("evidence_text") or ""))  # 通用证据文本
 
     for value in [raw_value, answer]:
+        # 情况 A：精确匹配成功
         if value and value in text:
             score += 5.0
+        # 情况 B：紧凑数值匹配成功
         compact = _compact_numeric_text(value)
         if compact and compact in _compact_numeric_text(text):
             score += 3.5
+    # 检查问题和节点中是否同时出现了同一个财务关键词
     for keyword in FINANCIAL_KEYWORDS:
         if keyword in question and keyword in node.text:
             score += 4.0
+    # 利用 CSV 中标注的“证据原文”进行匹配
     for snippet in [value_evidence, unit_evidence, evidence_text]:
         if len(snippet) >= 16 and snippet[:80] in text:
             score += 3.0
         elif snippet:
             score += _char_overlap_score(snippet, text)
+
+    # 如果 CSV 中标注了单位（如"元"、"万元"），且该单位出现在节点文本中，加 1 分
     if str(row.get("answer_unit") or "") and str(row.get("answer_unit")) in node.text:
         score += 1.0
     return score
 
 
+# _clean_text(text) - 基础清理 加 .replace(" ", "") - 去除所有空格
 def _normalize_for_match(text: str) -> str:
     return _clean_text(text).replace(" ", "")
 
-
+# 从一段文本中剔除所有“非数字”相关的字符，只保留数字、小数点、负号、括号和百分号
 def _compact_numeric_text(text: str) -> str:
     return re.sub(r"[^0-9.\-()%]", "", text or "")
 

@@ -66,7 +66,7 @@ def retrieve(
     config: Annotated[Path, typer.Option(help="Experiment config path.")] = ...,
 ) -> None:
     """Run retrieval for an experiment config."""
-    config_path = resolve_project_path(config)
+    config_path = resolve_project_path(config)  # 获取配置文件的绝对路径
     try:
         run_dir = run_retrieval(config_path)
     except FileNotFoundError as exc:

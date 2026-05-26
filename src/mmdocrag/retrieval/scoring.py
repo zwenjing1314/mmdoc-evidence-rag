@@ -13,14 +13,16 @@ def tokenize(text: str) -> list[str]:
 
 class SimpleBM25:
     def __init__(self, docs: list[str], k1: float = 1.5, b: float = 0.75):
-        self.tokens = [tokenize(doc) for doc in docs]
-        self.k1 = k1
-        self.b = b
-        self.doc_count = len(self.tokens)
-        self.avgdl = sum(len(doc) for doc in self.tokens) / max(self.doc_count, 1)
+        self.tokens = [tokenize(doc) for doc in docs]  # 1. 把所有文档切分成单词列表
+        self.k1 = k1  # 控制词频饱和的速度
+        self.b = b  # 控制文档长度对分数的影响（防止长文档因为词多就占便宜）
+        self.doc_count = len(self.tokens)  # 2. 统计总共有多少个文档
+        self.avgdl = sum(len(doc) for doc in self.tokens) / max(self.doc_count, 1)  # 3. 计算文档的平均长度 (avg document length)
+
+        # 4. 计算 DF (Document Frequency)：每个词出现在了多少个不同的文档里
         self.df: Counter[str] = Counter()
         for doc in self.tokens:
-            self.df.update(set(doc))
+            self.df.update(set(doc))  # 用 set 去重，确保一个词在一个文档里只计一次
 
     def score(self, query: str) -> list[float]:
         query_tokens = tokenize(query)

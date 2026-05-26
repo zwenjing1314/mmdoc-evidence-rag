@@ -6,6 +6,7 @@ from pydantic import BaseModel, ConfigDict, Field
 
 
 class StrictRecord(BaseModel):
+    # extra="allow" 的含义：允许额外字段（不在类定义中的字段）
     model_config = ConfigDict(extra="allow")
 
 
@@ -18,6 +19,7 @@ class DocumentRecord(StrictRecord):
     language: str = ""
     num_pages: int = 0
     metadata: dict[str, Any] = Field(default_factory=dict)
+    # custom_field="这个字段不在类定义中"  # 不会报错
 
 
 class PageRecord(StrictRecord):
