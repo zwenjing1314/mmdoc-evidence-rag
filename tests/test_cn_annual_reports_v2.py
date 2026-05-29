@@ -50,7 +50,9 @@ def test_cn_annotation_rows_include_unit_and_evidence_text():
         questions_per_doc=8,
     )
 
-    revenue = next(row for row in rows if row["question_type"] == "numeric" and "营业收入" in row["question"])
+    revenue = next(
+        row for row in rows if row["question_type"] == "numeric" and "营业收入" in row["question"]
+    )
     assert revenue["answer"] == "233,432,768,960.43 元"
     assert revenue["answer_unit"] == "元"
     assert "单位：元" in revenue["unit_evidence_text"]

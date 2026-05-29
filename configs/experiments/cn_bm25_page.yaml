@@ -2,6 +2,7 @@ experiment_name: cn_bm25_page
 dataset: cn_annual_reports
 retriever:
   type: bm25_page
+  search_scope: document
   top_k: [1, 5, 10]
 evaluation:
   metrics:

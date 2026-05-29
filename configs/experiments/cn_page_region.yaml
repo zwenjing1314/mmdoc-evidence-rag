@@ -2,6 +2,7 @@ experiment_name: cn_page_region
 dataset: cn_annual_reports
 retriever:
   type: page_region
+  search_scope: document
   page_retriever: dense_page
   region_retriever: layout_node
   page_top_k: 10

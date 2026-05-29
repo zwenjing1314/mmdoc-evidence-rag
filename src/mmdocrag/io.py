@@ -30,10 +30,13 @@ def _jsonify(value: Any) -> Any:
 def _unjsonify(key: str, value: Any) -> Any:
     if key in JSON_COLUMNS and isinstance(value, str) and value:
         try:
-            return json.loads(value)  # json.loads(json_string) 将JSON格式的字符串反序列化为Python对象
+            return json.loads(
+                value
+            )  # json.loads(json_string) 将JSON格式的字符串反序列化为Python对象
         except json.JSONDecodeError:
             return value
     return value
+
 
 """
 1.准备数据：有一堆 Pydantic 对象（如 DocumentRecord）。
@@ -41,6 +44,8 @@ def _unjsonify(key: str, value: Any) -> Any:
 3.建表：pl.DataFrame(rows) 把这些字典变成一个整齐的表格。
 4.存盘：.write_parquet(path) 把这个表格永久保存到硬盘。
 """
+
+
 def write_records(path: Path, records: list[BaseModel]) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     rows = []
@@ -71,6 +76,8 @@ _unjsonify 的作用
     - 原始 row: {"node_id": "n1", "bbox": "[80.0, 120.0, 520.0, 140.0]"} (bbox 是字符串)
     - 经过 cleaned 处理后: {"node_id": "n1", "bbox": [80.0, 120.0, 520.0, 140.0]} (bbox 变回了列表)
 """
+
+
 def read_records(path: Path, model: type[T]) -> list[T]:
     if not path.exists():
         raise FileNotFoundError(f"Missing required table: {path}")

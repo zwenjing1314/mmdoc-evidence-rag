@@ -1,8 +1,9 @@
 from __future__ import annotations
 
 from mmdocrag.evaluation.metrics import mrr, page_recall_at_k, region_hit_at_k
+from mmdocrag.retrieval.pipeline import retrieve_pages
 from mmdocrag.retrieval.scoring import SimpleBM25, SimpleTfidf, reciprocal_rank_fusion
-from mmdocrag.schemas import QueryRecord, RetrievalHit
+from mmdocrag.schemas import PageRecord, QueryRecord, RetrievalHit
 
 
 def test_bm25_ranks_matching_document_first():
@@ -24,6 +25,31 @@ def test_rrf_combines_rankings():
 
     assert scores["b"] > scores["c"]
     assert scores["b"] > 0
+
+
+def test_document_scope_retrieves_only_query_document_pages():
+    pages = [
+        PageRecord(
+            doc_id="doc1", page_id="doc1_p1", page_index=1, page_text="本页是目标年报的普通说明"
+        ),
+        PageRecord(doc_id="doc2", page_id="doc2_p1", page_index=1, page_text="营业收入 999 元"),
+    ]
+    queries = [
+        QueryRecord(
+            query_id="q1",
+            dataset="demo",
+            doc_id="doc1",
+            question="营业收入是多少？",
+            evidence_page_ids=["doc1_p1"],
+        )
+    ]
+
+    corpus_hits = retrieve_pages(queries, pages, method="bm25", top_k=1, search_scope="corpus")
+    document_hits = retrieve_pages(queries, pages, method="bm25", top_k=1, search_scope="document")
+
+    assert corpus_hits[0].doc_id == "doc2"
+    assert document_hits[0].doc_id == "doc1"
+    assert document_hits[0].page_id == "doc1_p1"
 
 
 def test_metrics_page_and_region_hit():

@@ -49,9 +49,7 @@ def prepare(
 
 @app.command("build-cn-annotations")
 def build_cn_annotations_command(
-    questions_per_doc: Annotated[
-        int, typer.Option(help="Target QA rows per annual report.")
-    ] = 8,
+    questions_per_doc: Annotated[int, typer.Option(help="Target QA rows per annual report.")] = 8,
     limit_docs: Annotated[
         int | None, typer.Option(help="Optional PDF limit for quick annotation generation.")
     ] = None,
@@ -73,7 +71,9 @@ def retrieve(
         console.print(f"[red]{exc}[/red]")
         console.print("[yellow]If raw data is not ready, run the demo flow first:[/yellow]")
         console.print("[bold]uv run mdr prepare --dataset demo[/bold]")
-        console.print("[bold]uv run mdr retrieve --config configs/experiments/demo_bm25_page.yaml[/bold]")
+        console.print(
+            "[bold]uv run mdr retrieve --config configs/experiments/demo_bm25_page.yaml[/bold]"
+        )
         raise typer.Exit(1) from exc
     console.print(f"[green]Retrieval run written to:[/green] {run_dir}")
 

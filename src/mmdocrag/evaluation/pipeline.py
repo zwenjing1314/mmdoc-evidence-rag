@@ -18,7 +18,9 @@ def evaluate_run(run: Path) -> dict[str, float]:
     _, _, _, queries = read_processed_dataset(data_root() / "processed" / dataset)
     hits = read_hits(run_dir / "predictions.parquet")
     metrics = evaluate_metrics(queries, hits)
-    (run_dir / "metrics.json").write_text(json.dumps(metrics, indent=2, ensure_ascii=False), encoding="utf-8")
+    (run_dir / "metrics.json").write_text(
+        json.dumps(metrics, indent=2, ensure_ascii=False), encoding="utf-8"
+    )
     write_errors(run_dir / "errors.csv", queries, hits)
     write_summary(run_dir / "summary.md", run_info, metrics, queries, hits)
     return metrics
@@ -57,7 +59,9 @@ def write_errors(path: Path, queries: list[QueryRecord], hits: list[RetrievalHit
                     "region_ok": region_ok,
                 }
             )
-    pl.DataFrame(rows or [{"query_id": "", "question": "", "page_ok": True, "region_ok": True}]).write_csv(path)
+    pl.DataFrame(
+        rows or [{"query_id": "", "question": "", "page_ok": True, "region_ok": True}]
+    ).write_csv(path)
 
 
 def write_summary(
@@ -93,6 +97,8 @@ def write_summary(
         lines.append(f"- Gold pages: {', '.join(query.evidence_page_ids) or '-'}")
         for hit in top:
             location = hit.node_id or hit.page_id
-            lines.append(f"- Hit {hit.rank}: `{location}` score={hit.score:.4f} text={hit.text[:120]}")
+            lines.append(
+                f"- Hit {hit.rank}: `{location}` score={hit.score:.4f} text={hit.text[:120]}"
+            )
         lines.append("")
     path.write_text("\n".join(lines), encoding="utf-8")

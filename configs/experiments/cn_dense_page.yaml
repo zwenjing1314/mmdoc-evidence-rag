@@ -2,6 +2,7 @@ experiment_name: cn_dense_page
 dataset: cn_annual_reports
 retriever:
   type: dense_page
+  search_scope: document
   encoder: BAAI/bge-m3
   top_k: [1, 5, 10]
 evaluation:

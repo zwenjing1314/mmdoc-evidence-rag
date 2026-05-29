@@ -203,7 +203,15 @@ def prepare_demo(limit_docs: int | None = None) -> PrepareResult:
     ]
     queries = [query for query in queries if query.doc_id in allowed]
     write_processed_dataset(processed_dir, documents, pages, nodes, queries)
-    return PrepareResult(dataset, processed_dir, len(documents), len(pages), len(nodes), len(queries), "Demo dataset prepared.")
+    return PrepareResult(
+        dataset,
+        processed_dir,
+        len(documents),
+        len(pages),
+        len(nodes),
+        len(queries),
+        "Demo dataset prepared.",
+    )
 
 
 def prepare_mmdocir(limit_docs: int | None = None) -> PrepareResult:
@@ -220,7 +228,15 @@ def prepare_mmdocir(limit_docs: int | None = None) -> PrepareResult:
 
     documents, pages, nodes, queries = _generic_prepare_from_tables(dataset, raw_files, limit_docs)
     write_processed_dataset(processed_dir, documents, pages, nodes, queries)
-    return PrepareResult(dataset, processed_dir, len(documents), len(pages), len(nodes), len(queries), "MMDocIR generic preparation completed.")
+    return PrepareResult(
+        dataset,
+        processed_dir,
+        len(documents),
+        len(pages),
+        len(nodes),
+        len(queries),
+        "MMDocIR generic preparation completed.",
+    )
 
 
 def prepare_cn_annual_reports(limit_docs: int | None = None) -> PrepareResult:
@@ -255,7 +271,15 @@ def prepare_cn_annual_reports(limit_docs: int | None = None) -> PrepareResult:
             processed_dir,
             "No Chinese annual report PDFs found. Put PDFs under data/raw/cn_annual_reports/pdfs and fill qa_annotations_template.csv.",
         )
-        return PrepareResult(dataset, processed_dir, 0, 0, 0, 0, "Chinese annual report PDFs not found; annotation template generated.")
+        return PrepareResult(
+            dataset,
+            processed_dir,
+            0,
+            0,
+            0,
+            0,
+            "Chinese annual report PDFs not found; annotation template generated.",
+        )
 
     documents: list[DocumentRecord] = []  # 文档列表
     pages: list[PageRecord] = []  # 页面列表
@@ -291,9 +315,10 @@ def prepare_cn_annual_reports(limit_docs: int | None = None) -> PrepareResult:
                     page_text=normalized_text,
                     ocr_text=normalized_text,
                     # 是一个字典，用于存储额外的、可选的元数据
-                    metadata={"source_pdf": str(pdf),   # 来源 PDF 文件的完整路径
-                              "parser": "pymupdf"}  # 使用的解析器名称
-                    ,
+                    metadata={
+                        "source_pdf": str(pdf),  # 来源 PDF 文件的完整路径
+                        "parser": "pymupdf",
+                    },  # 使用的解析器名称
                 )
             )
             nodes.extend(
@@ -408,25 +433,40 @@ def _generic_prepare_from_tables(
         return [], [], [], []
     doc_ids = []
     for row in records:
-        doc_id = str(row.get("doc_id") or row.get("document_id") or row.get("pdf_id") or row.get("file_name") or "doc_001")
+        doc_id = str(
+            row.get("doc_id")
+            or row.get("document_id")
+            or row.get("pdf_id")
+            or row.get("file_name")
+            or "doc_001"
+        )
         if doc_id not in doc_ids:
             doc_ids.append(doc_id)
     if limit_docs is not None:
         doc_ids = doc_ids[:limit_docs]
     allowed = set(doc_ids)
     documents = [
-        DocumentRecord(doc_id=doc_id, dataset=dataset, title=doc_id, language="mixed") for doc_id in doc_ids
+        DocumentRecord(doc_id=doc_id, dataset=dataset, title=doc_id, language="mixed")
+        for doc_id in doc_ids
     ]
     pages_by_id: dict[str, PageRecord] = {}
     nodes: list[EvidenceNode] = []
     queries: list[QueryRecord] = []
     for idx, row in enumerate(records, start=1):
-        doc_id = str(row.get("doc_id") or row.get("document_id") or row.get("pdf_id") or row.get("file_name") or "doc_001")
+        doc_id = str(
+            row.get("doc_id")
+            or row.get("document_id")
+            or row.get("pdf_id")
+            or row.get("file_name")
+            or "doc_001"
+        )
         if doc_id not in allowed:
             continue
         page_index = int(row.get("page_index") or row.get("page") or row.get("page_id") or 1)
         page_id = str(row.get("page_id") or f"{doc_id}_p{page_index}")
-        text = str(row.get("text") or row.get("page_text") or row.get("content") or row.get("answer") or "")
+        text = str(
+            row.get("text") or row.get("page_text") or row.get("content") or row.get("answer") or ""
+        )
         pages_by_id.setdefault(
             page_id,
             PageRecord(doc_id=doc_id, page_id=page_id, page_index=page_index, page_text=text),
@@ -461,7 +501,11 @@ def _generic_prepare_from_tables(
 def _read_table_like(path: Path) -> list[dict[str, Any]]:
     try:
         if path.suffix == ".jsonl":
-            rows = [json.loads(line) for line in path.read_text(encoding="utf-8").splitlines() if line.strip()]
+            rows = [
+                json.loads(line)
+                for line in path.read_text(encoding="utf-8").splitlines()
+                if line.strip()
+            ]
         elif path.suffix == ".json":
             data = json.loads(path.read_text(encoding="utf-8"))
             rows = data if isinstance(data, list) else data.get("data", [])
@@ -496,7 +540,9 @@ def _extract_pdf_page_items(path: Path) -> list[dict[str, Any]]:
         with fitz.open(path) as doc:  # 打开 PDF 文档
             for page in doc:  # 第1层循环：遍历每一页
                 blocks = []  # 当前页面的文本块列表
-                for block in page.get_text("blocks") or []:  # ← 第2层循环：遍历每个文本块  block 一般返回7个字段 x1, y1, x2, y2, text, block_no, block_type
+                for block in (
+                    page.get_text("blocks") or []
+                ):  # ← 第2层循环：遍历每个文本块  block 一般返回7个字段 x1, y1, x2, y2, text, block_no, block_type
                     if len(block) < 5:  # 字段小于等于 5，则忽略
                         continue
                     text = _clean_text(str(block[4]))
@@ -504,7 +550,12 @@ def _extract_pdf_page_items(path: Path) -> list[dict[str, Any]]:
                         continue
                     blocks.append(
                         {
-                            "bbox": [float(block[0]), float(block[1]), float(block[2]), float(block[3])],
+                            "bbox": [
+                                float(block[0]),
+                                float(block[1]),
+                                float(block[2]),
+                                float(block[3]),
+                            ],
                             "text": text,
                         }
                     )
@@ -541,7 +592,9 @@ def _build_cn_page_nodes(
     blocks: list[dict[str, Any]],
     reading_order_base: int,
 ) -> list[EvidenceNode]:
-    raw_chunks = _block_chunks(blocks) or _fallback_text_chunks(text)  # 将 PyMuPDF 提取的 blocks 列表转换为简化的 chunk 字典列表。 当无法获取 PDF blocks 时，基于文本规则将纯文本切分成 chunks
+    raw_chunks = (
+        _block_chunks(blocks) or _fallback_text_chunks(text)
+    )  # 将 PyMuPDF 提取的 blocks 列表转换为简化的 chunk 字典列表。 当无法获取 PDF blocks 时，基于文本规则将纯文本切分成 chunks
     chunks: list[dict[str, Any]] = []
     seen: set[str] = set()
     for chunk in raw_chunks:
@@ -560,20 +613,26 @@ def _build_cn_page_nodes(
                 # **metric_chunk 展开 {"text": ..., "node_type": "table_row"}
                 chunks.append({**metric_chunk, "bbox": chunk.get("bbox")})
         # 处理普通文本块（粗粒度）
-        key = _normalize_for_match(chunk_text)[:220]  # 比财务指标的 180 字符更长. 因为普通段落的多样性更高，需要更长的指纹来确保唯一性
+        key = _normalize_for_match(chunk_text)[
+            :220
+        ]  # 比财务指标的 180 字符更长. 因为普通段落的多样性更高，需要更长的指纹来确保唯一性
         if len(chunk_text) >= 12 and key not in seen:
             seen.add(key)
             chunks.append(
                 {
                     "text": chunk_text[:900],  # 限制长度
-                    "node_type": "table_block" if _looks_like_table_block(chunk_text) else "paragraph",
+                    "node_type": "table_block"
+                    if _looks_like_table_block(chunk_text)
+                    else "paragraph",
                     "bbox": chunk.get("bbox"),
                 }
             )
 
     # 前面的切分逻辑没有产生任何 chunks（例如页面完全是空白的），则创建一个默认的节点，避免页面没有任何证据节点
     if not chunks:
-        chunks.append({"text": _clean_text(text) or page_id, "node_type": "paragraph", "bbox": None})
+        chunks.append(
+            {"text": _clean_text(text) or page_id, "node_type": "paragraph", "bbox": None}
+        )
 
     # 是将切分好的文本片段（chunks）转换为标准的证据节点（EvidenceNode）对象，这是页面处理的最后一步
     unit_candidates = _unit_candidates(_clean_text(text))
@@ -600,6 +659,7 @@ def _build_cn_page_nodes(
         )
     return nodes
 
+
 # 将 PyMuPDF 提取的 blocks 列表转换为简化的 chunk 字典列表
 def _block_chunks(blocks: list[dict[str, Any]]) -> list[dict[str, Any]]:
     return [
@@ -618,7 +678,9 @@ def _fallback_text_chunks(text: str) -> list[dict[str, Any]]:
     current: list[str] = []  # 累积普通文本行
     for line in lines:
         # 步骤2：检测是否是财务数据行
-        is_financial_line = _contains_financial_keyword(line) and bool(NUMBER_PATTERN.search(line))  # 子串关键字检查和数字检测，同时满足两个条件才认为是财务数据行
+        is_financial_line = _contains_financial_keyword(line) and bool(
+            NUMBER_PATTERN.search(line)
+        )  # 子串关键字检查和数字检测，同时满足两个条件才认为是财务数据行
         if is_financial_line:
             # 步骤3a：如果是财务行，先保存之前累积的普通文本
             if current:
@@ -637,6 +699,7 @@ def _fallback_text_chunks(text: str) -> list[dict[str, Any]]:
     if current:
         chunks.append({"text": " ".join(current), "bbox": None})
     return chunks
+
 
 # 从文本中提取财务指标数据行
 """
@@ -660,6 +723,8 @@ metric_chunks = [
     }
 ]
 """
+
+
 def _metric_row_chunks(text: str) -> list[dict[str, str]]:
     chunks = []
     for keyword in FINANCIAL_KEYWORDS:
@@ -745,7 +810,12 @@ def _build_cn_doc_annotation_rows(
         skipped.append("report_title")
 
     metric_specs = [
-        ("营业收入", ["营业收入"], f"{company}{year or ''}年年度报告披露的营业收入是多少？", "main_accounting_data"),
+        (
+            "营业收入",
+            ["营业收入"],
+            f"{company}{year or ''}年年度报告披露的营业收入是多少？",
+            "main_accounting_data",
+        ),
         (
             "归属于上市公司股东的净利润",
             ["归属于上市公司股东的净利润"],
@@ -993,7 +1063,9 @@ def _find_recent_unit(page_texts: list[str], current_page_zero_index: int) -> tu
         if not matches:
             continue
         match = matches[-1]
-        return match.group(1), _clip_text(page_texts[page_index], match.group(0), before=80, after=120)
+        return match.group(1), _clip_text(
+            page_texts[page_index], match.group(0), before=80, after=120
+        )
     return "", ""
 
 
@@ -1029,8 +1101,12 @@ def _load_cn_queries(
         for idx, row in enumerate(frame.to_dicts(), start=1):  # 转换为字典列表并进行遍历
             doc_id = str(row.get("doc_id") or "")  # 提取 doc_id
             pages = str(row.get("evidence_pages") or "")  # 解析 evidence_pages
-            evidence_page_ids = [item.strip() for item in pages.split(";") if item.strip()]  # 因为一个问题的证据可能分布在多个页面上，用分号分隔。
-            evidence_node_ids, node_match_status = _match_cn_evidence_nodes(row, evidence_page_ids, nodes_by_page)
+            evidence_page_ids = [
+                item.strip() for item in pages.split(";") if item.strip()
+            ]  # 因为一个问题的证据可能分布在多个页面上，用分号分隔。
+            evidence_node_ids, node_match_status = _match_cn_evidence_nodes(
+                row, evidence_page_ids, nodes_by_page
+            )
             metadata = {
                 key: value
                 for key, value in row.items()
@@ -1056,7 +1132,8 @@ def _load_cn_queries(
                     question_type=str(row.get("question_type") or row.get("evidence_type") or ""),
                     evidence_page_ids=evidence_page_ids,
                     evidence_node_ids=evidence_node_ids,
-                    is_answerable=str(row.get("is_answerable", "true")).lower() not in {"false", "0", "no"},
+                    is_answerable=str(row.get("is_answerable", "true")).lower()
+                    not in {"false", "0", "no"},
                     metadata=metadata,
                 )
             )
@@ -1078,7 +1155,9 @@ def _match_cn_evidence_nodes(
                 scored.append((score, node))
     # 步骤 2：排序并选择 Top 3
     if scored:
-        ordered = sorted(scored, key=lambda item: (-item[0], item[1].reading_order))  # 按分数倒序排序，如果分数相同则按阅读顺序排序
+        ordered = sorted(
+            scored, key=lambda item: (-item[0], item[1].reading_order)
+        )  # 按分数倒序排序，如果分数相同则按阅读顺序排序
         node_ids = []
         for _, node in ordered[:3]:
             if node.node_id not in node_ids:
@@ -1134,6 +1213,7 @@ def _score_node_for_annotation(row: dict[str, Any], node: EvidenceNode) -> float
 # _clean_text(text) - 基础清理 加 .replace(" ", "") - 去除所有空格
 def _normalize_for_match(text: str) -> str:
     return _clean_text(text).replace(" ", "")
+
 
 # 从一段文本中剔除所有“非数字”相关的字符，只保留数字、小数点、负号、括号和百分号
 def _compact_numeric_text(text: str) -> str:
