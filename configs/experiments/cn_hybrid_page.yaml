@@ -1,23 +1,21 @@
-experiment_name: cn_global_region
+experiment_name: cn_hybrid_page
 dataset: cn_annual_reports
 retriever:
-  type: global_region
+  type: hybrid_page
   search_scope: document
-  method: dense
+  page_methods:
+    - bm25
+    - dense
   encoder: BAAI/bge-small-zh-v1.5
 #  encoder: BAAI/bge-m3
   require_model: true
   dense_max_seq_length: 128
   dense_batch_size: 8
-  node_types:
-    - paragraph
-    - table_block
-    - table_row
-  region_top_k: 5
+  candidate_top_k: 20
+  top_k: [1, 5, 10]
 evaluation:
   metrics:
     - page_recall
-    - region_hit
     - mrr
     - ndcg
-output_dir: runs/retrieval/cn_global_region
+output_dir: runs/retrieval/cn_hybrid_page

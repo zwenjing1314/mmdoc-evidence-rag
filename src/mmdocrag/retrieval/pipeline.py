@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 import os
 import shutil
+from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
 from typing import Any
@@ -15,6 +16,13 @@ from mmdocrag.schemas import EvidenceNode, PageRecord, QueryRecord, RetrievalHit
 
 SEARCH_SCOPE_CORPUS = "corpus"
 SEARCH_SCOPE_DOCUMENT = "document"
+_SENTENCE_TRANSFORMER_CACHE: dict[str, Any] = {}
+
+
+@dataclass(frozen=True)
+class ScoreResult:
+    scores: list[list[float]]
+    backend: str
 
 
 def run_retrieval(config_path: Path) -> Path:
@@ -46,7 +54,12 @@ def run_retrieval(config_path: Path) -> Path:
             top_k=max_top_k(retriever),
             encoder=str(retriever.get("encoder", "BAAI/bge-m3")),
             search_scope=search_scope,
+            require_dense_model=require_dense_model(retriever),
+            dense_batch_size=dense_batch_size(retriever),
+            dense_max_seq_length=dense_max_seq_length(retriever),
         )
+    elif retriever_type == "hybrid_page":
+        hits = retrieve_hybrid_pages(queries, pages, retriever)
     elif retriever_type == "layout_node":
         node_types = set(retriever.get("node_types", []))
         selected_nodes = [node for node in nodes if not node_types or node.node_type in node_types]
@@ -56,9 +69,14 @@ def run_retrieval(config_path: Path) -> Path:
             method="dense",
             top_k=max_top_k(retriever),
             search_scope=search_scope,
+            require_dense_model=require_dense_model(retriever),
+            dense_batch_size=dense_batch_size(retriever),
+            dense_max_seq_length=dense_max_seq_length(retriever),
         )
     elif retriever_type == "page_region":
         hits = retrieve_page_region(queries, pages, nodes, retriever)
+    elif retriever_type == "hybrid_page_region":
+        hits = retrieve_hybrid_page_region(queries, pages, nodes, retriever)
     elif retriever_type == "global_region":
         hits = retrieve_global_region(queries, nodes, retriever)
     elif retriever_type == "oracle_page_region":
@@ -77,6 +95,7 @@ def run_retrieval(config_path: Path) -> Path:
                 "dataset": dataset,
                 "retriever_type": retriever_type,
                 "hits": len(hits),
+                "actual_retrievers": sorted({hit.retriever for hit in hits}),
             },
             indent=2,
             ensure_ascii=False,
@@ -103,6 +122,21 @@ def normalize_search_scope(retriever: dict[str, Any]) -> str:
     if scope in {"all", "global", SEARCH_SCOPE_CORPUS}:
         return SEARCH_SCOPE_CORPUS
     raise ValueError(f"Unsupported search_scope: {scope}. Use 'corpus' or 'document'.")
+
+
+def require_dense_model(retriever: dict[str, Any]) -> bool:
+    return bool(retriever.get("require_model", retriever.get("require_dense_model", False)))
+
+
+def dense_batch_size(retriever: dict[str, Any]) -> int:
+    return int(retriever.get("dense_batch_size", os.getenv("MDR_DENSE_BATCH_SIZE", 8)))
+
+
+def dense_max_seq_length(retriever: dict[str, Any]) -> int | None:
+    value = retriever.get("dense_max_seq_length", os.getenv("MDR_DENSE_MAX_SEQ_LENGTH"))
+    if value in {None, ""}:
+        return None
+    return int(value)
 
 
 # # 为 单文档检索 的QueryRecord建立字典
@@ -139,6 +173,27 @@ def selected_node_types(retriever: dict[str, Any]) -> set[str]:
     return {str(item) for item in retriever.get("node_types", [])}
 
 
+def page_fusion_methods(retriever: dict[str, Any]) -> list[str]:
+    methods = retriever.get("page_methods", retriever.get("methods", ["bm25", "dense"]))
+    if isinstance(methods, str):
+        return [methods]
+    return [str(method) for method in methods]
+
+
+def normalize_retrieval_method(value: Any, default: str = "dense") -> str:
+    method = str(value or default).lower()
+    aliases = {
+        "bm25_page": "bm25",
+        "dense_page": "dense",
+        "tfidf_page": "tfidf",
+        "layout_node": "dense",
+        "dense_node": "dense",
+        "bm25_node": "bm25",
+        "tfidf_node": "tfidf",
+    }
+    return aliases.get(method, method)
+
+
 def filter_nodes_by_type(
     nodes: list[EvidenceNode], node_types: set[str] | None = None
 ) -> list[EvidenceNode]:
@@ -173,6 +228,9 @@ def retrieve_pages(
     top_k: int,
     encoder: str | None = None,
     search_scope: str = SEARCH_SCOPE_CORPUS,
+    require_dense_model: bool = False,
+    dense_batch_size: int = 8,
+    dense_max_seq_length: int | None = None,
 ) -> list[RetrievalHit]:
     search_scope = normalize_search_scope({"search_scope": search_scope})
     if search_scope == SEARCH_SCOPE_DOCUMENT:
@@ -180,14 +238,31 @@ def retrieve_pages(
         hits: list[RetrievalHit] = []
         for doc_id, doc_queries in group_queries_by_doc(queries).items():
             hits.extend(
-                retrieve_pages(doc_queries, pages_by_doc.get(doc_id, []), method, top_k, encoder)
+                retrieve_pages(
+                    doc_queries,
+                    pages_by_doc.get(doc_id, []),
+                    method,
+                    top_k,
+                    encoder,
+                    require_dense_model=require_dense_model,
+                    dense_batch_size=dense_batch_size,
+                    dense_max_seq_length=dense_max_seq_length,
+                )
             )
         return hits
 
     docs = [page.page_text or page.ocr_text or page.page_id for page in pages]
-    scores_by_query = score_texts([query.question for query in queries], docs, method, encoder)
+    score_result = score_texts_with_backend(
+        [query.question for query in queries],
+        docs,
+        method,
+        encoder,
+        require_dense_model,
+        dense_batch_size,
+        dense_max_seq_length,
+    )
     hits: list[RetrievalHit] = []
-    for query, scores in zip(queries, scores_by_query, strict=True):
+    for query, scores in zip(queries, score_result.scores, strict=True):
         ranked = sorted(enumerate(scores), key=lambda item: item[1], reverse=True)[:top_k]
         for rank, (index, score) in enumerate(ranked, start=1):
             page = pages[index]
@@ -199,10 +274,70 @@ def retrieve_pages(
                     doc_id=page.doc_id,
                     page_id=page.page_id,
                     text=page.page_text or page.ocr_text,
-                    retriever=method,
+                    retriever=score_result.backend,
                 )
             )
     return hits
+
+
+def retrieve_hybrid_pages(
+    queries: list[QueryRecord],
+    pages: list[PageRecord],
+    retriever: dict[str, Any],
+) -> list[RetrievalHit]:
+    top_k = int(retriever.get("page_top_k", max_top_k(retriever)))
+    candidate_top_k = int(retriever.get("candidate_top_k", max(top_k, 20)))
+    search_scope = normalize_search_scope(retriever)
+    if search_scope == SEARCH_SCOPE_DOCUMENT:
+        pages_by_doc = group_pages_by_doc(pages)
+        hits: list[RetrievalHit] = []
+        for doc_id, doc_queries in group_queries_by_doc(queries).items():
+            hits.extend(
+                retrieve_hybrid_pages(
+                    doc_queries,
+                    pages_by_doc.get(doc_id, []),
+                    {**retriever, "search_scope": SEARCH_SCOPE_CORPUS},
+                )
+            )
+        return hits
+
+    encoder = str(retriever.get("encoder", "BAAI/bge-m3"))
+    method_hits = [
+        retrieve_pages(
+            queries,
+            pages,
+            method=method,
+            top_k=candidate_top_k,
+            encoder=encoder,
+            search_scope=SEARCH_SCOPE_CORPUS,
+            require_dense_model=require_dense_model(retriever),
+            dense_batch_size=dense_batch_size(retriever),
+            dense_max_seq_length=dense_max_seq_length(retriever),
+        )
+        for method in page_fusion_methods(retriever)
+    ]
+    page_by_id = {page.page_id: page for page in pages}
+    final_hits: list[RetrievalHit] = []
+    for query in queries:
+        rankings = [
+            [hit.page_id for hit in hits if hit.query_id == query.query_id] for hits in method_hits
+        ]
+        fused = reciprocal_rank_fusion([ranking for ranking in rankings if ranking])
+        ranked_page_ids = sorted(fused, key=fused.get, reverse=True)[:top_k]
+        for rank, page_id in enumerate(ranked_page_ids, start=1):
+            page = page_by_id[page_id]
+            final_hits.append(
+                RetrievalHit(
+                    query_id=query.query_id,
+                    rank=rank,
+                    score=float(fused[page_id]),
+                    doc_id=page.doc_id,
+                    page_id=page.page_id,
+                    text=page.page_text or page.ocr_text,
+                    retriever="hybrid_page",
+                )
+            )
+    return final_hits
 
 
 def retrieve_nodes(
@@ -212,6 +347,9 @@ def retrieve_nodes(
     top_k: int,
     encoder: str | None = None,
     search_scope: str = SEARCH_SCOPE_CORPUS,
+    require_dense_model: bool = False,
+    dense_batch_size: int = 8,
+    dense_max_seq_length: int | None = None,
 ) -> list[RetrievalHit]:
     search_scope = normalize_search_scope({"search_scope": search_scope})
     if search_scope == SEARCH_SCOPE_DOCUMENT:
@@ -219,14 +357,31 @@ def retrieve_nodes(
         hits: list[RetrievalHit] = []
         for doc_id, doc_queries in group_queries_by_doc(queries).items():
             hits.extend(
-                retrieve_nodes(doc_queries, nodes_by_doc.get(doc_id, []), method, top_k, encoder)
+                retrieve_nodes(
+                    doc_queries,
+                    nodes_by_doc.get(doc_id, []),
+                    method,
+                    top_k,
+                    encoder,
+                    require_dense_model=require_dense_model,
+                    dense_batch_size=dense_batch_size,
+                    dense_max_seq_length=dense_max_seq_length,
+                )
             )
         return hits
 
     docs = [node.text or node.node_id for node in nodes]
-    scores_by_query = score_texts([query.question for query in queries], docs, method, encoder)
+    score_result = score_texts_with_backend(
+        [query.question for query in queries],
+        docs,
+        method,
+        encoder,
+        require_dense_model,
+        dense_batch_size,
+        dense_max_seq_length,
+    )
     hits: list[RetrievalHit] = []
-    for query, scores in zip(queries, scores_by_query, strict=True):
+    for query, scores in zip(queries, score_result.scores, strict=True):
         ranked = sorted(enumerate(scores), key=lambda item: item[1], reverse=True)[:top_k]
         for rank, (index, score) in enumerate(ranked, start=1):
             node = nodes[index]
@@ -240,7 +395,7 @@ def retrieve_nodes(
                     node_id=node.node_id,
                     node_type=node.node_type,
                     text=node.text,
-                    retriever=method,
+                    retriever=score_result.backend,
                 )
             )
     return hits
@@ -256,11 +411,70 @@ def retrieve_page_region(
     region_top_k = int(retriever.get("region_top_k", 5))
     search_scope = normalize_search_scope(retriever)
     encoder = str(retriever.get("encoder", "BAAI/bge-m3"))
-    region_method = str(retriever.get("region_method", retriever.get("method", "dense")))
-    node_types = selected_node_types(retriever)
-    page_hits = retrieve_pages(
-        queries, pages, method="dense", top_k=page_top_k, encoder=encoder, search_scope=search_scope
+    page_method = normalize_retrieval_method(retriever.get("page_retriever"), "dense")
+    region_method = normalize_retrieval_method(
+        retriever.get("region_method", retriever.get("region_retriever", retriever.get("method"))),
+        "dense",
     )
+    page_hits = retrieve_pages(
+        queries,
+        pages,
+        method=page_method,
+        top_k=page_top_k,
+        encoder=encoder,
+        search_scope=search_scope,
+        require_dense_model=require_dense_model(retriever),
+        dense_batch_size=dense_batch_size(retriever),
+        dense_max_seq_length=dense_max_seq_length(retriever),
+    )
+    return retrieve_regions_from_page_hits(
+        queries,
+        page_hits,
+        nodes,
+        retriever,
+        region_top_k=region_top_k,
+        region_method=region_method,
+        encoder=encoder,
+        retriever_name="page_region",
+    )
+
+
+def retrieve_hybrid_page_region(
+    queries: list[QueryRecord],
+    pages: list[PageRecord],
+    nodes: list[EvidenceNode],
+    retriever: dict[str, Any],
+) -> list[RetrievalHit]:
+    region_top_k = int(retriever.get("region_top_k", 5))
+    encoder = str(retriever.get("encoder", "BAAI/bge-m3"))
+    region_method = normalize_retrieval_method(
+        retriever.get("region_method", retriever.get("region_retriever", retriever.get("method"))),
+        "dense",
+    )
+    page_hits = retrieve_hybrid_pages(queries, pages, retriever)
+    return retrieve_regions_from_page_hits(
+        queries,
+        page_hits,
+        nodes,
+        retriever,
+        region_top_k=region_top_k,
+        region_method=region_method,
+        encoder=encoder,
+        retriever_name="hybrid_page_region",
+    )
+
+
+def retrieve_regions_from_page_hits(
+    queries: list[QueryRecord],
+    page_hits: list[RetrievalHit],
+    nodes: list[EvidenceNode],
+    retriever: dict[str, Any],
+    region_top_k: int,
+    region_method: str,
+    encoder: str,
+    retriever_name: str,
+) -> list[RetrievalHit]:
+    node_types = selected_node_types(retriever)
     nodes_by_page = group_nodes_by_page(filter_nodes_by_type(nodes, node_types))
     final_hits: list[RetrievalHit] = []
     for query in queries:
@@ -276,6 +490,9 @@ def retrieve_page_region(
             method=region_method,
             top_k=len(candidate_nodes),
             encoder=encoder,
+            require_dense_model=require_dense_model(retriever),
+            dense_batch_size=dense_batch_size(retriever),
+            dense_max_seq_length=dense_max_seq_length(retriever),
         )
         page_ranking = [hit.page_id for hit in query_page_hits]
         node_ranking = [hit.node_id or "" for hit in node_hits]
@@ -291,7 +508,7 @@ def retrieve_page_region(
         ):
             final_hits.append(
                 hit.model_copy(
-                    update={"rank": rank, "score": float(score), "retriever": "page_region"}
+                    update={"rank": rank, "score": float(score), "retriever": retriever_name}
                 )
             )
     return final_hits
@@ -303,7 +520,10 @@ def retrieve_global_region(
     retriever: dict[str, Any],
 ) -> list[RetrievalHit]:
     top_k = int(retriever.get("region_top_k", max_top_k(retriever)))
-    method = str(retriever.get("method", retriever.get("region_method", "dense")))
+    method = normalize_retrieval_method(
+        retriever.get("method", retriever.get("region_method", retriever.get("region_retriever"))),
+        "dense",
+    )
     encoder = str(retriever.get("encoder", "BAAI/bge-m3"))
     search_scope = normalize_search_scope(retriever)
     selected_nodes = filter_nodes_by_type(nodes, selected_node_types(retriever))
@@ -314,6 +534,9 @@ def retrieve_global_region(
         top_k=top_k,
         encoder=encoder,
         search_scope=search_scope,
+        require_dense_model=require_dense_model(retriever),
+        dense_batch_size=dense_batch_size(retriever),
+        dense_max_seq_length=dense_max_seq_length(retriever),
     )
     return [hit.model_copy(update={"retriever": "global_region"}) for hit in hits]
 
@@ -324,7 +547,10 @@ def retrieve_oracle_page_region(
     retriever: dict[str, Any],
 ) -> list[RetrievalHit]:
     region_top_k = int(retriever.get("region_top_k", max_top_k(retriever)))
-    method = str(retriever.get("method", retriever.get("region_method", "dense")))
+    method = normalize_retrieval_method(
+        retriever.get("method", retriever.get("region_method", retriever.get("region_retriever"))),
+        "dense",
+    )
     encoder = str(retriever.get("encoder", "BAAI/bge-m3"))
     nodes_by_page = group_nodes_by_page(filter_nodes_by_type(nodes, selected_node_types(retriever)))
     hits: list[RetrievalHit] = []
@@ -340,6 +566,9 @@ def retrieve_oracle_page_region(
             method=method,
             top_k=region_top_k,
             encoder=encoder,
+            require_dense_model=require_dense_model(retriever),
+            dense_batch_size=dense_batch_size(retriever),
+            dense_max_seq_length=dense_max_seq_length(retriever),
         )
         hits.extend(
             hit.model_copy(update={"retriever": "oracle_page_region"}) for hit in query_hits
@@ -353,43 +582,102 @@ def score_texts(
     method: str,
     encoder: str | None = None,
 ) -> list[list[float]]:
+    return score_texts_with_backend(queries, docs, method, encoder).scores
+
+
+def score_texts_with_backend(
+    queries: list[str],
+    docs: list[str],
+    method: str,
+    encoder: str | None = None,
+    require_model: bool = False,
+    batch_size: int = 8,
+    max_seq_length: int | None = None,
+) -> ScoreResult:
     if method == "bm25":
         bm25 = SimpleBM25(docs)
-        return [bm25.score(query) for query in queries]
+        return ScoreResult([bm25.score(query) for query in queries], "bm25")
     if method == "dense":
-        model_scores = try_sentence_transformer_scores(queries, docs, encoder)
+        model_scores = try_sentence_transformer_scores(
+            queries, docs, encoder, batch_size=batch_size, max_seq_length=max_seq_length
+        )
         if model_scores is not None:
             return model_scores
+        if require_model:
+            model_name = encoder or "BAAI/bge-m3"
+            raise RuntimeError(
+                f"Dense retrieval requires local SentenceTransformer model `{model_name}`, "
+                "but it could not be loaded. Download/cache the model first, or set "
+                "`require_model: false` to allow TF-IDF fallback."
+            )
         tfidf = SimpleTfidf(docs)
-        return [tfidf.score(query) for query in queries]
+        return ScoreResult([tfidf.score(query) for query in queries], "dense:tfidf_fallback")
     tfidf = SimpleTfidf(docs)
-    return [tfidf.score(query) for query in queries]
+    return ScoreResult([tfidf.score(query) for query in queries], "tfidf")
 
 
 def try_sentence_transformer_scores(
     queries: list[str],
     docs: list[str],
     encoder: str | None,
-) -> list[list[float]] | None:
+    batch_size: int = 8,
+    max_seq_length: int | None = None,
+) -> ScoreResult | None:
     if os.getenv("MDR_DISABLE_SENTENCE_TRANSFORMERS", "0") == "1":
         return None
     try:
-        from sentence_transformers import SentenceTransformer
         from sentence_transformers.util import cos_sim
 
         model_name = encoder or "BAAI/bge-m3"
-        try:
-            model = SentenceTransformer(model_name, local_files_only=True)
-        except TypeError:
-            if os.getenv("MDR_ALLOW_MODEL_DOWNLOAD", "0") != "1":
-                return None
-            model = SentenceTransformer(model_name)
-        query_embeddings = model.encode(queries, normalize_embeddings=True)
-        doc_embeddings = model.encode(docs, normalize_embeddings=True)
+        model = get_sentence_transformer(model_name, max_seq_length=max_seq_length)
+        query_embeddings = model.encode(
+            queries, normalize_embeddings=True, batch_size=batch_size, show_progress_bar=False
+        )
+        doc_embeddings = model.encode(
+            docs, normalize_embeddings=True, batch_size=batch_size, show_progress_bar=False
+        )
         matrix = cos_sim(query_embeddings, doc_embeddings).cpu().numpy()
-        return [[float(value) for value in row] for row in matrix]
+        scores = [[float(value) for value in row] for row in matrix]
+        suffix = f":maxlen={max_seq_length}" if max_seq_length else ""
+        return ScoreResult(scores, f"dense:sentence_transformers:{model_name}{suffix}")
     except Exception:
         return None
+
+
+def get_sentence_transformer(model_name: str, max_seq_length: int | None = None) -> Any:
+    cache_key = f"{model_name}::max_seq_length={max_seq_length or 'default'}"
+    if cache_key in _SENTENCE_TRANSFORMER_CACHE:
+        return _SENTENCE_TRANSFORMER_CACHE[cache_key]
+
+    from sentence_transformers import SentenceTransformer
+
+    previous_hf_offline = os.environ.get("HF_HUB_OFFLINE")
+    previous_transformers_offline = os.environ.get("TRANSFORMERS_OFFLINE")
+    if os.getenv("MDR_ALLOW_MODEL_DOWNLOAD", "0") != "1":
+        os.environ.setdefault("HF_HUB_OFFLINE", "1")
+        os.environ.setdefault("TRANSFORMERS_OFFLINE", "1")
+    try:
+        try:
+            model = SentenceTransformer(model_name, local_files_only=True)
+        except Exception:
+            if os.getenv("MDR_ALLOW_MODEL_DOWNLOAD", "0") != "1":
+                raise
+            model = SentenceTransformer(model_name)
+    finally:
+        if previous_hf_offline is None:
+            os.environ.pop("HF_HUB_OFFLINE", None)
+        else:
+            os.environ["HF_HUB_OFFLINE"] = previous_hf_offline
+        if previous_transformers_offline is None:
+            os.environ.pop("TRANSFORMERS_OFFLINE", None)
+        else:
+            os.environ["TRANSFORMERS_OFFLINE"] = previous_transformers_offline
+
+    if max_seq_length:
+        model.max_seq_length = max_seq_length
+
+    _SENTENCE_TRANSFORMER_CACHE[cache_key] = model
+    return model
 
 
 def update_latest(output_root: Path, run_dir: Path) -> None:

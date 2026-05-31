@@ -4,7 +4,11 @@ retriever:
   type: oracle_page_region
   search_scope: document
   method: dense
-  encoder: BAAI/bge-m3
+  encoder: BAAI/bge-small-zh-v1.5
+#  encoder: BAAI/bge-m3
+  require_model: true
+  dense_max_seq_length: 128
+  dense_batch_size: 8
   node_types:
     - paragraph
     - table_block

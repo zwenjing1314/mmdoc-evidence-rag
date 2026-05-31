@@ -1,10 +1,15 @@
 from __future__ import annotations
 
+import pytest
+
 from mmdocrag.evaluation.metrics import mrr, ndcg_at_k, page_recall_at_k, region_hit_at_k
 from mmdocrag.retrieval.pipeline import (
     retrieve_global_region,
+    retrieve_hybrid_page_region,
+    retrieve_hybrid_pages,
     retrieve_oracle_page_region,
     retrieve_pages,
+    score_texts_with_backend,
 )
 from mmdocrag.retrieval.scoring import SimpleBM25, SimpleTfidf, reciprocal_rank_fusion
 from mmdocrag.schemas import EvidenceNode, PageRecord, QueryRecord, RetrievalHit
@@ -22,6 +27,30 @@ def test_tfidf_ranks_matching_document_first():
     scores = scorer.score("现金流量净额")
 
     assert scores[0] > scores[1]
+
+
+def test_dense_fallback_backend_is_explicit(monkeypatch):
+    monkeypatch.setenv("MDR_DISABLE_SENTENCE_TRANSFORMERS", "1")
+
+    result = score_texts_with_backend(
+        ["营业收入是多少"], ["营业收入 100 元", "普通说明"], "dense", "BAAI/bge-m3"
+    )
+
+    assert result.backend == "dense:tfidf_fallback"
+    assert result.scores[0][0] > result.scores[0][1]
+
+
+def test_dense_require_model_raises_when_model_missing(monkeypatch):
+    monkeypatch.setenv("MDR_DISABLE_SENTENCE_TRANSFORMERS", "1")
+
+    with pytest.raises(RuntimeError, match="requires local SentenceTransformer model"):
+        score_texts_with_backend(
+            ["营业收入是多少"],
+            ["营业收入 100 元"],
+            "dense",
+            "BAAI/bge-m3",
+            require_model=True,
+        )
 
 
 def test_rrf_combines_rankings():
@@ -119,6 +148,87 @@ def test_global_region_retrieves_nodes_directly():
     assert hits[0].node_id == "doc1_p2_n1"
     assert hits[0].page_id == "doc1_p2"
     assert hits[0].retriever == "global_region"
+
+
+def test_hybrid_page_retrieves_with_rrf_fusion():
+    pages = [
+        PageRecord(doc_id="doc1", page_id="doc1_p1", page_index=1, page_text="普通说明"),
+        PageRecord(doc_id="doc1", page_id="doc1_p2", page_index=2, page_text="营业收入 100 元"),
+    ]
+    queries = [
+        QueryRecord(
+            query_id="q1",
+            dataset="demo",
+            doc_id="doc1",
+            question="营业收入是多少？",
+            evidence_page_ids=["doc1_p2"],
+        )
+    ]
+
+    hits = retrieve_hybrid_pages(
+        queries,
+        pages,
+        {
+            "search_scope": "document",
+            "page_methods": ["bm25", "tfidf"],
+            "top_k": [1],
+            "candidate_top_k": 2,
+        },
+    )
+
+    assert hits[0].page_id == "doc1_p2"
+    assert hits[0].retriever == "hybrid_page"
+
+
+def test_hybrid_page_region_returns_region_nodes():
+    pages = [
+        PageRecord(doc_id="doc1", page_id="doc1_p1", page_index=1, page_text="普通说明"),
+        PageRecord(doc_id="doc1", page_id="doc1_p2", page_index=2, page_text="营业收入 100 元"),
+    ]
+    nodes = [
+        EvidenceNode(
+            node_id="doc1_p1_n1",
+            doc_id="doc1",
+            page_id="doc1_p1",
+            node_type="paragraph",
+            text="普通说明",
+        ),
+        EvidenceNode(
+            node_id="doc1_p2_n1",
+            doc_id="doc1",
+            page_id="doc1_p2",
+            node_type="table_row",
+            text="营业收入 100 元",
+        ),
+    ]
+    queries = [
+        QueryRecord(
+            query_id="q1",
+            dataset="demo",
+            doc_id="doc1",
+            question="营业收入是多少？",
+            evidence_page_ids=["doc1_p2"],
+            evidence_node_ids=["doc1_p2_n1"],
+        )
+    ]
+
+    hits = retrieve_hybrid_page_region(
+        queries,
+        pages,
+        nodes,
+        {
+            "search_scope": "document",
+            "page_methods": ["bm25", "tfidf"],
+            "candidate_top_k": 2,
+            "page_top_k": 1,
+            "region_method": "bm25",
+            "region_top_k": 1,
+        },
+    )
+
+    assert hits[0].page_id == "doc1_p2"
+    assert hits[0].node_id == "doc1_p2_n1"
+    assert hits[0].retriever == "hybrid_page_region"
 
 
 def test_oracle_page_region_only_searches_gold_pages():

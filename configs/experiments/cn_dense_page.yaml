@@ -3,7 +3,11 @@ dataset: cn_annual_reports
 retriever:
   type: dense_page
   search_scope: document
-  encoder: BAAI/bge-m3
+  encoder: BAAI/bge-small-zh-v1.5
+#  encoder: BAAI/bge-m3
+  require_model: true
+  dense_max_seq_length: 128
+  dense_batch_size: 8
   top_k: [1, 5, 10]
 evaluation:
   metrics:

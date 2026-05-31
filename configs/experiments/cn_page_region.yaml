@@ -5,8 +5,18 @@ retriever:
   search_scope: document
   page_retriever: dense_page
   region_retriever: layout_node
+  encoder: BAAI/bge-small-zh-v1.5
+#  encoder: BAAI/bge-m3
+  require_model: true
+  dense_max_seq_length: 128
+  dense_batch_size: 8
   page_top_k: 10
+  region_method: dense
   region_top_k: 5
+  node_types:
+    - paragraph
+    - table_block
+    - table_row
   fusion:
     method: rrf
 evaluation:
