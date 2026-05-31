@@ -59,6 +59,10 @@ def run_retrieval(config_path: Path) -> Path:
         )
     elif retriever_type == "page_region":
         hits = retrieve_page_region(queries, pages, nodes, retriever)
+    elif retriever_type == "global_region":
+        hits = retrieve_global_region(queries, nodes, retriever)
+    elif retriever_type == "oracle_page_region":
+        hits = retrieve_oracle_page_region(queries, nodes, retriever)
     else:
         raise ValueError(f"Unsupported retriever type: {retriever_type}")
 
@@ -89,6 +93,7 @@ def max_top_k(retriever: dict[str, Any]) -> int:
     if isinstance(value, list):
         return max(int(item) for item in value)
     return int(value)
+
 
 # 判断是进行 全库检索 还是 单文档检索
 def normalize_search_scope(retriever: dict[str, Any]) -> str:
@@ -123,6 +128,25 @@ def group_nodes_by_doc(nodes: list[EvidenceNode]) -> dict[str, list[EvidenceNode
     return grouped
 
 
+def group_nodes_by_page(nodes: list[EvidenceNode]) -> dict[str, list[EvidenceNode]]:
+    grouped: dict[str, list[EvidenceNode]] = {}
+    for node in nodes:
+        grouped.setdefault(node.page_id, []).append(node)
+    return grouped
+
+
+def selected_node_types(retriever: dict[str, Any]) -> set[str]:
+    return {str(item) for item in retriever.get("node_types", [])}
+
+
+def filter_nodes_by_type(
+    nodes: list[EvidenceNode], node_types: set[str] | None = None
+) -> list[EvidenceNode]:
+    if not node_types:
+        return nodes
+    return [node for node in nodes if node.node_type in node_types]
+
+
 # 根据问题（Query）在页面（Pages）中进行检索、打分，并返回相关性最高的 Top-K 个结果
 """
 可以把这个过程拆解为三个关键步骤：
@@ -140,6 +164,8 @@ def group_nodes_by_doc(nodes: list[EvidenceNode]) -> dict[str, list[EvidenceNode
     截取：只拿走前 top_k 个分数最高的页面索引。
     封装：最后把这些高分页面包装成 RetrievalHit 对象（包含页码、分数、文本内容等）返回给你。
 """
+
+
 def retrieve_pages(
     queries: list[QueryRecord],
     pages: list[PageRecord],
@@ -230,12 +256,12 @@ def retrieve_page_region(
     region_top_k = int(retriever.get("region_top_k", 5))
     search_scope = normalize_search_scope(retriever)
     encoder = str(retriever.get("encoder", "BAAI/bge-m3"))
+    region_method = str(retriever.get("region_method", retriever.get("method", "dense")))
+    node_types = selected_node_types(retriever)
     page_hits = retrieve_pages(
         queries, pages, method="dense", top_k=page_top_k, encoder=encoder, search_scope=search_scope
     )
-    nodes_by_page: dict[str, list[EvidenceNode]] = {}
-    for node in nodes:
-        nodes_by_page.setdefault(node.page_id, []).append(node)
+    nodes_by_page = group_nodes_by_page(filter_nodes_by_type(nodes, node_types))
     final_hits: list[RetrievalHit] = []
     for query in queries:
         query_page_hits = [hit for hit in page_hits if hit.query_id == query.query_id]
@@ -245,7 +271,11 @@ def retrieve_page_region(
         if not candidate_nodes:
             continue
         node_hits = retrieve_nodes(
-            [query], candidate_nodes, method="dense", top_k=len(candidate_nodes), encoder=encoder
+            [query],
+            candidate_nodes,
+            method=region_method,
+            top_k=len(candidate_nodes),
+            encoder=encoder,
         )
         page_ranking = [hit.page_id for hit in query_page_hits]
         node_ranking = [hit.node_id or "" for hit in node_hits]
@@ -265,6 +295,56 @@ def retrieve_page_region(
                 )
             )
     return final_hits
+
+
+def retrieve_global_region(
+    queries: list[QueryRecord],
+    nodes: list[EvidenceNode],
+    retriever: dict[str, Any],
+) -> list[RetrievalHit]:
+    top_k = int(retriever.get("region_top_k", max_top_k(retriever)))
+    method = str(retriever.get("method", retriever.get("region_method", "dense")))
+    encoder = str(retriever.get("encoder", "BAAI/bge-m3"))
+    search_scope = normalize_search_scope(retriever)
+    selected_nodes = filter_nodes_by_type(nodes, selected_node_types(retriever))
+    hits = retrieve_nodes(
+        queries,
+        selected_nodes,
+        method=method,
+        top_k=top_k,
+        encoder=encoder,
+        search_scope=search_scope,
+    )
+    return [hit.model_copy(update={"retriever": "global_region"}) for hit in hits]
+
+
+def retrieve_oracle_page_region(
+    queries: list[QueryRecord],
+    nodes: list[EvidenceNode],
+    retriever: dict[str, Any],
+) -> list[RetrievalHit]:
+    region_top_k = int(retriever.get("region_top_k", max_top_k(retriever)))
+    method = str(retriever.get("method", retriever.get("region_method", "dense")))
+    encoder = str(retriever.get("encoder", "BAAI/bge-m3"))
+    nodes_by_page = group_nodes_by_page(filter_nodes_by_type(nodes, selected_node_types(retriever)))
+    hits: list[RetrievalHit] = []
+    for query in queries:
+        candidate_nodes: list[EvidenceNode] = []
+        for page_id in query.evidence_page_ids:
+            candidate_nodes.extend(nodes_by_page.get(page_id, []))
+        if not candidate_nodes:
+            continue
+        query_hits = retrieve_nodes(
+            [query],
+            candidate_nodes,
+            method=method,
+            top_k=region_top_k,
+            encoder=encoder,
+        )
+        hits.extend(
+            hit.model_copy(update={"retriever": "oracle_page_region"}) for hit in query_hits
+        )
+    return hits
 
 
 def score_texts(

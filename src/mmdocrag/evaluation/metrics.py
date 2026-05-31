@@ -5,6 +5,7 @@ import math
 from mmdocrag.schemas import QueryRecord, RetrievalHit
 
 
+# 将扁平的检索结果列表整理成按问题分组的结构
 def group_hits(hits: list[RetrievalHit]) -> dict[str, list[RetrievalHit]]:
     grouped: dict[str, list[RetrievalHit]] = {}
     for hit in sorted(hits, key=lambda item: (item.query_id, item.rank)):
@@ -26,6 +27,12 @@ def page_recall_at_k(queries: list[QueryRecord], hits: list[RetrievalHit], k: in
     return correct / total if total else 0.0
 
 
+def hit_matches_target(query: QueryRecord, hit: RetrievalHit) -> bool:
+    if hit.node_id and query.evidence_node_ids:
+        return hit.node_id in set(query.evidence_node_ids)
+    return hit.page_id in set(query.evidence_page_ids)
+
+
 def mrr(queries: list[QueryRecord], hits: list[RetrievalHit]) -> float:
     grouped = group_hits(hits)
     total = 0
@@ -34,10 +41,8 @@ def mrr(queries: list[QueryRecord], hits: list[RetrievalHit]) -> float:
         if not query.evidence_page_ids and not query.evidence_node_ids:
             continue
         total += 1
-        target_pages = set(query.evidence_page_ids)
-        target_nodes = set(query.evidence_node_ids)
         for hit in grouped.get(query.query_id, []):
-            if hit.page_id in target_pages or (hit.node_id and hit.node_id in target_nodes):
+            if hit_matches_target(query, hit):
                 score += 1 / hit.rank
                 break
     return score / total if total else 0.0
@@ -48,18 +53,20 @@ def ndcg_at_k(queries: list[QueryRecord], hits: list[RetrievalHit], k: int) -> f
     total = 0
     score = 0.0
     for query in queries:
-        targets = set(query.evidence_page_ids) | set(query.evidence_node_ids)
-        if not targets:
+        if not query.evidence_page_ids and not query.evidence_node_ids:
             continue
         total += 1
         dcg = 0.0
         for hit in grouped.get(query.query_id, [])[:k]:
-            item_ids = {hit.page_id}
-            if hit.node_id:
-                item_ids.add(hit.node_id)
-            relevance = 1 if item_ids.intersection(targets) else 0
+            relevance = 1 if hit_matches_target(query, hit) else 0
             dcg += relevance / math.log2(hit.rank + 1)
-        ideal_hits = min(len(targets), k)
+        target_count = (
+            len(query.evidence_node_ids)
+            if any(hit.node_id for hit in grouped.get(query.query_id, [])[:k])
+            and query.evidence_node_ids
+            else len(query.evidence_page_ids)
+        )
+        ideal_hits = min(target_count, k)
         idcg = sum(1 / math.log2(rank + 1) for rank in range(1, ideal_hits + 1))
         score += dcg / idcg if idcg else 0.0
     return score / total if total else 0.0

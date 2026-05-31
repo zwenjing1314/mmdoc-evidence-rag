@@ -85,6 +85,8 @@ Token 4: "收"
 '收'：不在 Doc 1 里 → continue (跳过)
 最终总分 (Doc 1): 0.0
 """
+
+
 class SimpleBM25:
     def __init__(self, docs: list[str], k1: float = 1.5, b: float = 0.75):
         self.tokens = [tokenize(doc) for doc in docs]  # 1. 把所有文档切分成单词列表

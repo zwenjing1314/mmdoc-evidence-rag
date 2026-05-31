@@ -14,6 +14,7 @@ def load_yaml(path: Path) -> dict[str, Any]:
     with path.open("r", encoding="utf-8") as f:
         return yaml.safe_load(f) or {}
 
+
 # 把 YAML 配置文件读成 Python 字典之后，再把里面的环境变量占位符替换成真实路径后的字典
 def expand_env(value: Any) -> Any:
     if isinstance(value, str):
@@ -29,6 +30,7 @@ def expand_env(value: Any) -> Any:
     if isinstance(value, list):
         return [expand_env(item) for item in value]
     return value
+
 
 # 反序列化 yaml 字典数据
 def load_config(path: Path) -> dict[str, Any]:

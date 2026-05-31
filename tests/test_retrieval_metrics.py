@@ -1,9 +1,13 @@
 from __future__ import annotations
 
-from mmdocrag.evaluation.metrics import mrr, page_recall_at_k, region_hit_at_k
-from mmdocrag.retrieval.pipeline import retrieve_pages
+from mmdocrag.evaluation.metrics import mrr, ndcg_at_k, page_recall_at_k, region_hit_at_k
+from mmdocrag.retrieval.pipeline import (
+    retrieve_global_region,
+    retrieve_oracle_page_region,
+    retrieve_pages,
+)
 from mmdocrag.retrieval.scoring import SimpleBM25, SimpleTfidf, reciprocal_rank_fusion
-from mmdocrag.schemas import PageRecord, QueryRecord, RetrievalHit
+from mmdocrag.schemas import EvidenceNode, PageRecord, QueryRecord, RetrievalHit
 
 
 def test_bm25_ranks_matching_document_first():
@@ -78,3 +82,111 @@ def test_metrics_page_and_region_hit():
     assert page_recall_at_k(queries, hits, 1) == 1.0
     assert region_hit_at_k(queries, hits, 1) == 1.0
     assert mrr(queries, hits) == 1.0
+
+
+def test_global_region_retrieves_nodes_directly():
+    nodes = [
+        EvidenceNode(
+            node_id="doc1_p1_n1",
+            doc_id="doc1",
+            page_id="doc1_p1",
+            node_type="paragraph",
+            text="普通说明",
+        ),
+        EvidenceNode(
+            node_id="doc1_p2_n1",
+            doc_id="doc1",
+            page_id="doc1_p2",
+            node_type="table_row",
+            text="营业收入 100 元",
+        ),
+    ]
+    queries = [
+        QueryRecord(
+            query_id="q1",
+            dataset="demo",
+            doc_id="doc1",
+            question="营业收入是多少？",
+            evidence_page_ids=["doc1_p2"],
+            evidence_node_ids=["doc1_p2_n1"],
+        )
+    ]
+
+    hits = retrieve_global_region(
+        queries, nodes, {"search_scope": "document", "method": "bm25", "region_top_k": 1}
+    )
+
+    assert hits[0].node_id == "doc1_p2_n1"
+    assert hits[0].page_id == "doc1_p2"
+    assert hits[0].retriever == "global_region"
+
+
+def test_oracle_page_region_only_searches_gold_pages():
+    nodes = [
+        EvidenceNode(
+            node_id="doc1_p1_n1",
+            doc_id="doc1",
+            page_id="doc1_p1",
+            node_type="paragraph",
+            text="目标证据页上的普通说明",
+        ),
+        EvidenceNode(
+            node_id="doc1_p2_n1",
+            doc_id="doc1",
+            page_id="doc1_p2",
+            node_type="table_row",
+            text="营业收入 999 元",
+        ),
+    ]
+    queries = [
+        QueryRecord(
+            query_id="q1",
+            dataset="demo",
+            doc_id="doc1",
+            question="营业收入是多少？",
+            evidence_page_ids=["doc1_p1"],
+            evidence_node_ids=["doc1_p1_n1"],
+        )
+    ]
+
+    hits = retrieve_oracle_page_region(queries, nodes, {"method": "bm25", "region_top_k": 1})
+
+    assert hits[0].node_id == "doc1_p1_n1"
+    assert hits[0].page_id == "doc1_p1"
+    assert hits[0].retriever == "oracle_page_region"
+
+
+def test_ndcg_does_not_double_count_same_gold_page_for_node_hits():
+    queries = [
+        QueryRecord(
+            query_id="q1",
+            dataset="demo",
+            doc_id="doc1",
+            question="营业收入是多少？",
+            evidence_page_ids=["p1"],
+            evidence_node_ids=["n2"],
+        )
+    ]
+    hits = [
+        RetrievalHit(
+            query_id="q1",
+            rank=1,
+            score=2.0,
+            doc_id="doc1",
+            page_id="p1",
+            node_id="n1",
+            retriever="unit",
+        ),
+        RetrievalHit(
+            query_id="q1",
+            rank=2,
+            score=1.0,
+            doc_id="doc1",
+            page_id="p1",
+            node_id="n2",
+            retriever="unit",
+        ),
+    ]
+
+    assert ndcg_at_k(queries, hits, 2) <= 1.0
+    assert ndcg_at_k(queries, hits, 2) < 1.0

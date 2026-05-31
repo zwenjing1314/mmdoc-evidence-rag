@@ -1,0 +1,19 @@
+experiment_name: cn_oracle_page_region
+dataset: cn_annual_reports
+retriever:
+  type: oracle_page_region
+  search_scope: document
+  method: dense
+  encoder: BAAI/bge-m3
+  node_types:
+    - paragraph
+    - table_block
+    - table_row
+  region_top_k: 5
+evaluation:
+  metrics:
+    - page_recall
+    - region_hit
+    - mrr
+    - ndcg
+output_dir: runs/retrieval/cn_oracle_page_region

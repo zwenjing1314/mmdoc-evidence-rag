@@ -27,11 +27,13 @@ def evaluate_run(run: Path) -> dict[str, float]:
 
 
 def resolve_run_dir(run: Path) -> Path:
+    # 如果是符号链接 (Symlink)， resolve() 会顺着链接找到它真正指向的那个带时间戳的文件夹
     if run.is_symlink():
         return run.resolve()
     if run.is_dir():
         return run
     latest_txt = run.parent / "latest.txt"
+    # 场景：在某些不支持软链接的文件系统（如某些共享磁盘或 Windows 旧版本）上，程序会退而求其次，创建一个 latest.txt 文件，里面写着最新实验的路径。
     if run.name == "latest" and latest_txt.exists():
         return Path(latest_txt.read_text(encoding="utf-8").strip())
     raise FileNotFoundError(f"Run directory not found: {run}")

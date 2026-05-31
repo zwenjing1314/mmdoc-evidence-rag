@@ -78,6 +78,7 @@ _unjsonify 的作用
 """
 
 
+# 它的作用是把硬盘上高效存储的 Parquet 表格，转换成代码里方便操作的 Python 对象列表
 def read_records(path: Path, model: type[T]) -> list[T]:
     if not path.exists():
         raise FileNotFoundError(f"Missing required table: {path}")
