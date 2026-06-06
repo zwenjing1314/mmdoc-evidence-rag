@@ -4,12 +4,18 @@ import pytest
 
 from mmdocrag.evaluation.metrics import mrr, ndcg_at_k, page_recall_at_k, region_hit_at_k
 from mmdocrag.retrieval.pipeline import (
+    EvidenceCandidate,
+    retrieve_evidence_set_region,
     retrieve_global_region,
     retrieve_hybrid_page_region,
     retrieve_hybrid_pages,
     retrieve_oracle_page_region,
     retrieve_pages,
+    score_evidence_candidate,
     score_texts_with_backend,
+    select_minimal_evidence_set,
+    structured_numeric_scan_score,
+    text_has_unit,
 )
 from mmdocrag.retrieval.scoring import SimpleBM25, SimpleTfidf, reciprocal_rank_fusion
 from mmdocrag.schemas import EvidenceNode, PageRecord, QueryRecord, RetrievalHit
@@ -264,6 +270,355 @@ def test_oracle_page_region_only_searches_gold_pages():
     assert hits[0].node_id == "doc1_p1_n1"
     assert hits[0].page_id == "doc1_p1"
     assert hits[0].retriever == "oracle_page_region"
+
+
+def test_evidence_set_region_merges_page_and_global_candidates():
+    pages = [
+        PageRecord(doc_id="doc1", page_id="doc1_p1", page_index=1, page_text="营业收入页面"),
+        PageRecord(doc_id="doc1", page_id="doc1_p2", page_index=2, page_text="普通说明"),
+    ]
+    nodes = [
+        EvidenceNode(
+            node_id="doc1_p1_n1",
+            doc_id="doc1",
+            page_id="doc1_p1",
+            node_type="paragraph",
+            text="营业收入相关说明",
+        ),
+        EvidenceNode(
+            node_id="doc1_p2_n1",
+            doc_id="doc1",
+            page_id="doc1_p2",
+            node_type="table_row",
+            text="营业收入 2025 年 100 元",
+        ),
+    ]
+    queries = [
+        QueryRecord(
+            query_id="q1",
+            dataset="demo",
+            doc_id="doc1",
+            question="2025年营业收入是多少？",
+            question_type="numeric",
+            evidence_page_ids=["doc1_p2"],
+            evidence_node_ids=["doc1_p2_n1"],
+            metadata={"answer_unit": "元"},
+        )
+    ]
+
+    hits = retrieve_evidence_set_region(
+        queries,
+        pages,
+        nodes,
+        {
+            "search_scope": "document",
+            "page_methods": ["bm25"],
+            "candidate_top_k": 1,
+            "page_top_k": 1,
+            "global_region_top_k": 2,
+            "region_method": "bm25",
+            "output_top_k": 2,
+            "max_evidence_nodes": 2,
+            "node_types": ["paragraph", "table_row"],
+        },
+    )
+
+    assert {hit.node_id for hit in hits} == {"doc1_p1_n1", "doc1_p2_n1"}
+    assert hits[0].node_id == "doc1_p2_n1"
+    assert "global_region" in hits[0].metadata["candidate_sources"]
+    assert all(hit.retriever == "evidence_set_region" for hit in hits)
+
+
+def test_evidence_set_region_stays_inside_query_document():
+    pages = [
+        PageRecord(doc_id="doc1", page_id="doc1_p1", page_index=1, page_text="营业收入"),
+        PageRecord(doc_id="doc2", page_id="doc2_p1", page_index=1, page_text="营业收入 999 元"),
+    ]
+    nodes = [
+        EvidenceNode(
+            node_id="doc1_p1_n1",
+            doc_id="doc1",
+            page_id="doc1_p1",
+            node_type="table_row",
+            text="营业收入 100 元",
+        ),
+        EvidenceNode(
+            node_id="doc2_p1_n1",
+            doc_id="doc2",
+            page_id="doc2_p1",
+            node_type="table_row",
+            text="营业收入 999 元",
+        ),
+    ]
+    queries = [
+        QueryRecord(
+            query_id="q1",
+            dataset="demo",
+            doc_id="doc1",
+            question="营业收入是多少？",
+            question_type="numeric",
+            metadata={"answer_unit": "元"},
+        )
+    ]
+
+    hits = retrieve_evidence_set_region(
+        queries,
+        pages,
+        nodes,
+        {
+            "search_scope": "document",
+            "page_methods": ["bm25"],
+            "page_top_k": 1,
+            "global_region_top_k": 2,
+            "region_method": "bm25",
+            "output_top_k": 2,
+            "node_types": ["table_row"],
+        },
+    )
+
+    assert hits
+    assert {hit.doc_id for hit in hits} == {"doc1"}
+    assert "doc2_p1_n1" not in {hit.node_id for hit in hits}
+
+
+def test_evidence_set_prefers_table_row_with_required_coverage():
+    query = QueryRecord(
+        query_id="q1",
+        dataset="demo",
+        doc_id="doc1",
+        question="2025年营业收入是多少？",
+        question_type="numeric",
+        metadata={"answer_unit": "元"},
+    )
+    target_slots = {
+        "metric:营业收入",
+        "year:2025",
+        "unit:元",
+        "numeric_shape",
+    }
+    weak = EvidenceCandidate(
+        node=EvidenceNode(
+            node_id="n1",
+            doc_id="doc1",
+            page_id="p1",
+            node_type="paragraph",
+            text="营业收入相关说明",
+        ),
+        semantic_rank=1,
+    )
+    strong = EvidenceCandidate(
+        node=EvidenceNode(
+            node_id="n2",
+            doc_id="doc1",
+            page_id="p1",
+            node_type="table_row",
+            text="营业收入 2025 年 100 元",
+        ),
+        semantic_rank=2,
+    )
+
+    score_evidence_candidate(query, weak, target_slots)
+    score_evidence_candidate(query, strong, target_slots)
+    selected = select_minimal_evidence_set([weak, strong], target_slots, 1, 2)
+
+    assert selected[0].node.node_id == "n2"
+    assert strong.coverage_slots == target_slots
+    assert strong.combined_score > weak.combined_score
+
+
+def test_evidence_set_selects_two_nodes_when_unit_and_value_are_split():
+    query = QueryRecord(
+        query_id="q1",
+        dataset="demo",
+        doc_id="doc1",
+        question="2025年营业收入是多少？",
+        question_type="numeric",
+        metadata={"answer_unit": "元"},
+    )
+    target_slots = {
+        "metric:营业收入",
+        "year:2025",
+        "unit:元",
+        "numeric_shape",
+    }
+    unit_node = EvidenceCandidate(
+        node=EvidenceNode(
+            node_id="n1",
+            doc_id="doc1",
+            page_id="p1",
+            node_type="paragraph",
+            text="单位：元 项目 2025 年",
+        ),
+        semantic_rank=1,
+    )
+    value_node = EvidenceCandidate(
+        node=EvidenceNode(
+            node_id="n2",
+            doc_id="doc1",
+            page_id="p1",
+            node_type="table_row",
+            text="营业收入 100",
+        ),
+        semantic_rank=2,
+    )
+
+    score_evidence_candidate(query, unit_node, target_slots)
+    score_evidence_candidate(query, value_node, target_slots)
+    selected = select_minimal_evidence_set([unit_node, value_node], target_slots, 2, 2)
+
+    assert {candidate.node.node_id for candidate in selected[:2]} == {"n1", "n2"}
+
+
+def test_evidence_set_does_not_rank_by_gold_answer_value():
+    query = QueryRecord(
+        query_id="q1",
+        dataset="demo",
+        doc_id="doc1",
+        question="2025年营业收入是多少？",
+        answer="999 元",
+        question_type="numeric",
+        metadata={"answer_unit": "元", "raw_answer_value": "999"},
+    )
+    target_slots = {"metric:营业收入", "year:2025", "unit:元", "numeric_shape"}
+    covered = EvidenceCandidate(
+        node=EvidenceNode(
+            node_id="n1",
+            doc_id="doc1",
+            page_id="p1",
+            node_type="table_row",
+            text="营业收入 2025 年 100 元",
+        ),
+        semantic_rank=1,
+    )
+    leaked_value_only = EvidenceCandidate(
+        node=EvidenceNode(
+            node_id="n2",
+            doc_id="doc1",
+            page_id="p1",
+            node_type="paragraph",
+            text="999",
+        ),
+        semantic_rank=2,
+    )
+
+    score_evidence_candidate(query, covered, target_slots)
+    score_evidence_candidate(query, leaked_value_only, target_slots)
+
+    assert covered.combined_score > leaked_value_only.combined_score
+    assert not leaked_value_only.coverage_slots
+
+
+def test_evidence_set_unit_matching_does_not_treat_yiyuan_as_yuan():
+    assert text_has_unit("单位：元 营业收入 100", "元")
+    assert not text_has_unit("营业收入 100 亿元", "元")
+    assert text_has_unit("营业收入 100 亿元", "亿元")
+
+
+def test_structured_numeric_scan_prefers_metric_table_row_over_audit_narrative():
+    query = QueryRecord(
+        query_id="q1",
+        dataset="demo",
+        doc_id="doc1",
+        question="2025年营业收入是多少？",
+        question_type="numeric",
+        metadata={"answer_unit": "元"},
+    )
+    table_row = EvidenceNode(
+        node_id="n1",
+        doc_id="doc1",
+        page_id="p1",
+        node_type="table_row",
+        text="营业收入 233,432,768,960.43 343,176,440,712.96 -31.98%",
+    )
+    audit_text = EvidenceNode(
+        node_id="n2",
+        doc_id="doc1",
+        page_id="p2",
+        node_type="table_row",
+        text="营业收入为人民币 2,334 亿元，管理层确认收入时点存在审计风险",
+    )
+
+    assert structured_numeric_scan_score(query, table_row) > structured_numeric_scan_score(
+        query, audit_text
+    )
+
+
+def test_structured_numeric_scan_uses_same_page_header_context():
+    query = QueryRecord(
+        query_id="q1",
+        dataset="demo",
+        doc_id="doc1",
+        question="2025年营业收入是多少？",
+        question_type="numeric",
+        metadata={"answer_unit": "元"},
+    )
+    row = EvidenceNode(
+        node_id="n1",
+        doc_id="doc1",
+        page_id="p1",
+        node_type="table_row",
+        text="营业收入 233,432,768,960.43 343,176,440,712.96 -31.98%",
+    )
+    page_header = "单位：元 项目 2025 年 2024 年 本年比上年增减 2023 年"
+
+    assert structured_numeric_scan_score(query, row, page_header) > structured_numeric_scan_score(
+        query, row
+    )
+
+
+def test_evidence_set_cover_query_adds_first_page_anchor():
+    pages = [
+        PageRecord(doc_id="doc1", page_id="doc1_p2", page_index=2, page_text="年度报告目录"),
+        PageRecord(doc_id="doc1", page_id="doc1_p9", page_index=9, page_text="年度报告正文"),
+    ]
+    nodes = [
+        EvidenceNode(
+            node_id="doc1_p1_n1",
+            doc_id="doc1",
+            page_id="doc1_p1",
+            node_type="paragraph",
+            text="公司 2025 年年度报告",
+            metadata={"page_index": 1},
+        ),
+        EvidenceNode(
+            node_id="doc1_p9_n1",
+            doc_id="doc1",
+            page_id="doc1_p9",
+            node_type="paragraph",
+            text="2025 年年度报告正文",
+            metadata={"page_index": 9},
+        ),
+    ]
+    queries = [
+        QueryRecord(
+            query_id="q1",
+            dataset="demo",
+            doc_id="doc1",
+            question="这份年度报告对应的报告年度是哪一年？",
+            question_type="fact",
+            evidence_page_ids=["doc1_p1"],
+            evidence_node_ids=["doc1_p1_n1"],
+        )
+    ]
+
+    hits = retrieve_evidence_set_region(
+        queries,
+        pages,
+        nodes,
+        {
+            "search_scope": "document",
+            "page_methods": ["bm25"],
+            "page_top_k": 1,
+            "global_region_top_k": 1,
+            "cover_anchor_top_k": 1,
+            "region_method": "bm25",
+            "output_top_k": 2,
+            "node_types": ["paragraph"],
+        },
+    )
+
+    assert hits[0].node_id == "doc1_p1_n1"
+    assert "cover_anchor" in hits[0].metadata["candidate_sources"]
 
 
 def test_ndcg_does_not_double_count_same_gold_page_for_node_hits():

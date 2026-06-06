@@ -8,7 +8,7 @@ from rich.console import Console
 from rich.table import Table
 
 from mmdocrag.datasets import build_cn_annotations, prepare_dataset
-from mmdocrag.evaluation import evaluate_run
+from mmdocrag.evaluation import evaluate_run, verify_evidence_run
 from mmdocrag.exporting import export_demo_table
 from mmdocrag.paths import resolve_project_path
 from mmdocrag.retrieval import run_retrieval
@@ -88,6 +88,27 @@ def evaluate(
     run_path = resolve_project_path(run)
     metrics = evaluate_run(run_path)
     table = Table(title="Evaluation Metrics")
+    table.add_column("Metric")
+    table.add_column("Value", justify="right")
+    for key, value in metrics.items():
+        table.add_row(key, f"{value:.4f}")
+    console.print(table)
+
+
+@app.command("verify-evidence")
+def verify_evidence(
+    run: Annotated[
+        Path,
+        typer.Option(
+            help="Run directory, for example runs/retrieval/cn_evidence_set_region/latest."
+        ),
+    ] = ...,
+    top_k: Annotated[int, typer.Option(help="Number of evidence hits used as evidence set.")] = 3,
+) -> None:
+    """Evaluate whether retrieved evidence is sufficient to support answers."""
+    run_path = resolve_project_path(run)
+    metrics = verify_evidence_run(run_path, top_k=top_k)
+    table = Table(title="Evidence Sufficiency Metrics")
     table.add_column("Metric")
     table.add_column("Value", justify="right")
     for key, value in metrics.items():

@@ -73,6 +73,7 @@ class RetrievalHit(StrictRecord):
     node_type: str | None = None
     text: str = ""
     retriever: str
+    metadata: dict[str, Any] = Field(default_factory=dict)
 
 
 class RetrievalRun(StrictRecord):

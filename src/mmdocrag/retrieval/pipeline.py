@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import os
+import re
 import shutil
 from dataclasses import dataclass
 from datetime import datetime
@@ -18,11 +19,75 @@ SEARCH_SCOPE_CORPUS = "corpus"
 SEARCH_SCOPE_DOCUMENT = "document"
 _SENTENCE_TRANSFORMER_CACHE: dict[str, Any] = {}
 
+METRIC_ALIASES: dict[str, tuple[str, ...]] = {
+    "营业收入": ("营业收入", "营收"),
+    "归母净利润": ("归属于上市公司股东的净利润", "归母净利润", "净利润"),
+    "经营活动现金流量净额": ("经营活动产生的现金流量净额", "经营活动现金流量净额"),
+    "研发投入": ("研发投入", "研发费用", "研发支出"),
+    "资产总额": ("资产总额", "总资产"),
+    "负债合计": ("负债合计", "负债总额"),
+    "报告标题": ("报告标题", "标题处显示", "标题是什么"),
+    "报告年度": ("报告年度", "对应的报告年度", "哪一年"),
+    "风险": ("主要风险", "风险因素", "风险"),
+    "同比变化": ("同比", "本年比上年增减", "增减幅度", "相比上年"),
+}
+
+UNIT_TERMS = (
+    "人民币元",
+    "人民币万元",
+    "人民币亿元",
+    "百分点",
+    "万元",
+    "亿元",
+    "元",
+    "%",
+)
+
+QUESTION_STOP_TERMS = {
+    "多少",
+    "是什么",
+    "是多少",
+    "披露",
+    "显示",
+    "首页",
+    "标题处",
+    "这份",
+    "年度报告",
+    "报告",
+    "对应",
+    "公司",
+    "中",
+    "的",
+    "了",
+    "和",
+    "或",
+}
+
 
 @dataclass(frozen=True)
 class ScoreResult:
     scores: list[list[float]]
     backend: str
+
+
+@dataclass
+class EvidenceCandidate:
+    node: EvidenceNode
+    from_page_candidate: bool = False
+    from_global_region: bool = False
+    from_structured_scan: bool = False
+    from_cover_anchor: bool = False
+    page_rank: int | None = None
+    global_rank: int | None = None
+    structured_rank: int | None = None
+    cover_rank: int | None = None
+    structured_score: float = 0.0
+    semantic_rank: int | None = None
+    semantic_score: float = 0.0
+    coverage_slots: set[str] | None = None
+    coverage_score: float = 0.0
+    localization_score: float = 0.0
+    combined_score: float = 0.0
 
 
 def run_retrieval(config_path: Path) -> Path:
@@ -81,6 +146,8 @@ def run_retrieval(config_path: Path) -> Path:
         hits = retrieve_global_region(queries, nodes, retriever)
     elif retriever_type == "oracle_page_region":
         hits = retrieve_oracle_page_region(queries, nodes, retriever)
+    elif retriever_type == "evidence_set_region":
+        hits = retrieve_evidence_set_region(queries, pages, nodes, retriever)
     else:
         raise ValueError(f"Unsupported retriever type: {retriever_type}")
 
@@ -574,6 +641,547 @@ def retrieve_oracle_page_region(
             hit.model_copy(update={"retriever": "oracle_page_region"}) for hit in query_hits
         )
     return hits
+
+
+def retrieve_evidence_set_region(
+    queries: list[QueryRecord],
+    pages: list[PageRecord],
+    nodes: list[EvidenceNode],
+    retriever: dict[str, Any],
+) -> list[RetrievalHit]:
+    page_top_k = int(retriever.get("page_top_k", 10))
+    global_region_top_k = int(retriever.get("global_region_top_k", 20))
+    structured_scan_top_k = int(retriever.get("structured_scan_top_k", 20))
+    cover_anchor_top_k = int(retriever.get("cover_anchor_top_k", 8))
+    output_top_k = int(retriever.get("output_top_k", retriever.get("region_top_k", 5)))
+    max_evidence_nodes = int(retriever.get("max_evidence_nodes", 3))
+    encoder = str(retriever.get("encoder", "BAAI/bge-m3"))
+    region_method = normalize_retrieval_method(
+        retriever.get("region_method", retriever.get("method", retriever.get("region_retriever"))),
+        "dense",
+    )
+    selected_nodes = filter_nodes_by_type(nodes, selected_node_types(retriever))
+    nodes_by_page = group_nodes_by_page(selected_nodes)
+    nodes_by_doc = group_nodes_by_doc(selected_nodes)
+    nodes_by_id = {node.node_id: node for node in selected_nodes}
+
+    page_hits = retrieve_hybrid_pages(
+        queries,
+        pages,
+        {**retriever, "page_top_k": page_top_k, "top_k": page_top_k},
+    )
+    global_hits = retrieve_global_region(
+        queries,
+        selected_nodes,
+        {
+            **retriever,
+            "method": region_method,
+            "region_top_k": global_region_top_k,
+        },
+    )
+    page_hits_by_query = group_retrieval_hits(page_hits)
+    global_hits_by_query = group_retrieval_hits(global_hits)
+
+    final_hits: list[RetrievalHit] = []
+    for query in queries:
+        candidates = build_evidence_candidates(
+            query,
+            page_hits_by_query.get(query.query_id, []),
+            global_hits_by_query.get(query.query_id, []),
+            nodes_by_page,
+            nodes_by_id,
+        )
+        add_structured_scan_candidates(
+            query,
+            nodes_by_doc.get(query.doc_id, []),
+            candidates,
+            top_k=structured_scan_top_k,
+        )
+        add_cover_anchor_candidates(
+            query,
+            nodes_by_doc.get(query.doc_id, []),
+            candidates,
+            top_k=cover_anchor_top_k,
+        )
+        if not candidates:
+            continue
+
+        candidate_nodes = [candidate.node for candidate in candidates.values()]
+        semantic_hits = retrieve_nodes(
+            [query],
+            candidate_nodes,
+            method=region_method,
+            top_k=len(candidate_nodes),
+            encoder=encoder,
+            require_dense_model=require_dense_model(retriever),
+            dense_batch_size=dense_batch_size(retriever),
+            dense_max_seq_length=dense_max_seq_length(retriever),
+        )
+        for hit in semantic_hits:
+            if not hit.node_id or hit.node_id not in candidates:
+                continue
+            candidate = candidates[hit.node_id]
+            candidate.semantic_rank = hit.rank
+            candidate.semantic_score = float(hit.score)
+
+        target_slots = query_target_slots(query)
+        for candidate in candidates.values():
+            score_evidence_candidate(query, candidate, target_slots)
+
+        selected = select_minimal_evidence_set(
+            list(candidates.values()),
+            target_slots,
+            max_evidence_nodes=max_evidence_nodes,
+            output_top_k=output_top_k,
+        )
+        covered_slots: set[str] = set()
+        evidence_count = min(len(selected), max_evidence_nodes)
+        for rank, candidate in enumerate(selected, start=1):
+            slots = candidate.coverage_slots or set()
+            if rank <= evidence_count:
+                covered_slots.update(slots)
+            final_hits.append(
+                RetrievalHit(
+                    query_id=query.query_id,
+                    rank=rank,
+                    score=float(candidate.combined_score),
+                    doc_id=candidate.node.doc_id,
+                    page_id=candidate.node.page_id,
+                    node_id=candidate.node.node_id,
+                    node_type=candidate.node.node_type,
+                    text=candidate.node.text,
+                    retriever="evidence_set_region",
+                    metadata={
+                        "candidate_sources": candidate_sources(candidate),
+                        "coverage_slots": sorted(slots),
+                        "coverage_score": candidate.coverage_score,
+                        "semantic_score": candidate.semantic_score,
+                        "semantic_rank": candidate.semantic_rank,
+                        "page_rank": candidate.page_rank,
+                        "global_rank": candidate.global_rank,
+                        "structured_rank": candidate.structured_rank,
+                        "structured_score": candidate.structured_score,
+                        "cover_rank": candidate.cover_rank,
+                        "localization_score": candidate.localization_score,
+                        "selection_reason": selection_reason(candidate, slots, target_slots),
+                        "evidence_set_rank": rank if rank <= evidence_count else None,
+                        "covered_slots_after_selection": sorted(covered_slots),
+                        "target_slots": sorted(target_slots),
+                    },
+                )
+            )
+    return final_hits
+
+
+def group_retrieval_hits(hits: list[RetrievalHit]) -> dict[str, list[RetrievalHit]]:
+    grouped: dict[str, list[RetrievalHit]] = {}
+    for hit in sorted(hits, key=lambda item: (item.query_id, item.rank)):
+        grouped.setdefault(hit.query_id, []).append(hit)
+    return grouped
+
+
+def build_evidence_candidates(
+    query: QueryRecord,
+    page_hits: list[RetrievalHit],
+    global_hits: list[RetrievalHit],
+    nodes_by_page: dict[str, list[EvidenceNode]],
+    nodes_by_id: dict[str, EvidenceNode],
+) -> dict[str, EvidenceCandidate]:
+    candidates: dict[str, EvidenceCandidate] = {}
+    for page_hit in page_hits:
+        for node in nodes_by_page.get(page_hit.page_id, []):
+            if node.doc_id != query.doc_id:
+                continue
+            candidate = candidates.setdefault(node.node_id, EvidenceCandidate(node=node))
+            candidate.from_page_candidate = True
+            if candidate.page_rank is None or page_hit.rank < candidate.page_rank:
+                candidate.page_rank = page_hit.rank
+
+    for global_hit in global_hits:
+        if not global_hit.node_id:
+            continue
+        node = nodes_by_id.get(global_hit.node_id)
+        if node is None or node.doc_id != query.doc_id:
+            continue
+        candidate = candidates.setdefault(node.node_id, EvidenceCandidate(node=node))
+        candidate.from_global_region = True
+        if candidate.global_rank is None or global_hit.rank < candidate.global_rank:
+            candidate.global_rank = global_hit.rank
+    return candidates
+
+
+def add_structured_scan_candidates(
+    query: QueryRecord,
+    doc_nodes: list[EvidenceNode],
+    candidates: dict[str, EvidenceCandidate],
+    top_k: int,
+) -> None:
+    if query.question_type not in {"numeric", "comparison"}:
+        return
+    page_context = page_context_by_page(doc_nodes)
+    scored = [
+        (node, structured_numeric_scan_score(query, node, page_context.get(node.page_id, "")))
+        for node in doc_nodes
+        if node.text.strip()
+    ]
+    ranked = [
+        (node, score)
+        for node, score in sorted(scored, key=lambda item: item[1], reverse=True)
+        if score > 0
+    ][:top_k]
+    for rank, (node, score) in enumerate(ranked, start=1):
+        candidate = candidates.setdefault(node.node_id, EvidenceCandidate(node=node))
+        candidate.from_structured_scan = True
+        candidate.structured_score = max(candidate.structured_score, score)
+        if candidate.structured_rank is None or rank < candidate.structured_rank:
+            candidate.structured_rank = rank
+
+
+def add_cover_anchor_candidates(
+    query: QueryRecord,
+    doc_nodes: list[EvidenceNode],
+    candidates: dict[str, EvidenceCandidate],
+    top_k: int,
+) -> None:
+    if not is_cover_query(query):
+        return
+    first_page_nodes = sorted(
+        [node for node in doc_nodes if int(node.metadata.get("page_index", 999999)) == 1],
+        key=lambda node: node.reading_order,
+    )[:top_k]
+    for rank, node in enumerate(first_page_nodes, start=1):
+        candidate = candidates.setdefault(node.node_id, EvidenceCandidate(node=node))
+        candidate.from_cover_anchor = True
+        if candidate.cover_rank is None or rank < candidate.cover_rank:
+            candidate.cover_rank = rank
+
+
+def query_target_slots(query: QueryRecord) -> set[str]:
+    question = query.question
+    slots: set[str] = set()
+    for metric, aliases in METRIC_ALIASES.items():
+        if any(alias in question for alias in aliases):
+            slots.add(f"metric:{metric}")
+    for year in extract_years(question):
+        slots.add(f"year:{year}")
+    for unit in extract_units(question, query.metadata):
+        slots.add(f"unit:{unit}")
+    if needs_numeric_shape(query):
+        slots.add("numeric_shape")
+    for keyword in extract_question_keywords(question):
+        slots.add(f"keyword:{keyword}")
+    return slots
+
+
+def score_evidence_candidate(
+    query: QueryRecord,
+    candidate: EvidenceCandidate,
+    target_slots: set[str],
+) -> None:
+    text = normalize_text(candidate.node.text)
+    coverage_slots: set[str] = set()
+    for slot in target_slots:
+        if slot.startswith("metric:"):
+            metric = slot.removeprefix("metric:")
+            if any(alias in text for alias in METRIC_ALIASES.get(metric, ())):
+                coverage_slots.add(slot)
+        elif slot.startswith("year:"):
+            year = slot.removeprefix("year:")
+            if year in text:
+                coverage_slots.add(slot)
+        elif slot.startswith("unit:"):
+            unit = slot.removeprefix("unit:")
+            if text_has_unit(text, unit):
+                coverage_slots.add(slot)
+        elif slot.startswith("keyword:"):
+            keyword = slot.removeprefix("keyword:")
+            if keyword in text:
+                coverage_slots.add(slot)
+        elif slot == "numeric_shape" and has_numeric_shape(text):
+            coverage_slots.add(slot)
+
+    coverage_ratio = len(coverage_slots) / max(len(target_slots), 1)
+    semantic_rank_score = 1.0 / max(candidate.semantic_rank or 9999, 1)
+    page_bonus = 0.25 / candidate.page_rank if candidate.page_rank else 0.0
+    global_bonus = 0.25 / candidate.global_rank if candidate.global_rank else 0.0
+    structured_bonus = 0.4 / candidate.structured_rank if candidate.structured_rank else 0.0
+    structured_quality_bonus = min(candidate.structured_score * 0.2, 1.2)
+    cover_bonus = 0.5 / candidate.cover_rank if candidate.cover_rank else 0.0
+    type_bonus = node_type_bonus(query, candidate.node)
+    localization_score = evidence_localization_score(query, candidate.node, coverage_slots)
+    candidate.coverage_slots = coverage_slots
+    candidate.coverage_score = coverage_ratio
+    candidate.localization_score = localization_score
+    candidate.combined_score = (
+        semantic_rank_score
+        + page_bonus
+        + global_bonus
+        + structured_bonus
+        + structured_quality_bonus
+        + cover_bonus
+        + coverage_ratio * 1.5
+        + len(coverage_slots) * 0.08
+        + localization_score
+        + type_bonus
+    )
+
+
+def select_minimal_evidence_set(
+    candidates: list[EvidenceCandidate],
+    target_slots: set[str],
+    max_evidence_nodes: int,
+    output_top_k: int,
+) -> list[EvidenceCandidate]:
+    remaining = sorted(candidates, key=lambda item: item.combined_score, reverse=True)
+    selected: list[EvidenceCandidate] = []
+    covered: set[str] = set()
+    while remaining and len(selected) < max_evidence_nodes and covered != target_slots:
+        best = max(
+            remaining,
+            key=lambda item: (
+                len((item.coverage_slots or set()) - covered),
+                item.coverage_score,
+                item.combined_score,
+            ),
+        )
+        new_slots = (best.coverage_slots or set()) - covered
+        if selected and not new_slots:
+            break
+        selected.append(best)
+        covered.update(best.coverage_slots or set())
+        remaining.remove(best)
+
+    if not selected and remaining:
+        selected.append(remaining.pop(0))
+
+    selected_ids = {candidate.node.node_id for candidate in selected}
+    fillers = [
+        candidate
+        for candidate in sorted(candidates, key=lambda item: item.combined_score, reverse=True)
+        if candidate.node.node_id not in selected_ids
+    ]
+    return (selected + fillers)[:output_top_k]
+
+
+def structured_numeric_scan_score(
+    query: QueryRecord, node: EvidenceNode, page_context: str = ""
+) -> float:
+    text = normalize_text(node.text)
+    context = normalize_text(page_context)
+    if not text:
+        return 0.0
+    matched_metric = matched_metric_aliases(query, text)
+    if not matched_metric:
+        return 0.0
+    score = 1.0
+    if any(year in text or year in context for year in extract_years(query.question)):
+        score += 0.8
+    units = extract_units(query.question, query.metadata)
+    if any(text_has_unit(text, unit) or text_has_unit(context, unit) for unit in units):
+        score += 0.8
+    if has_numeric_shape(text):
+        score += 0.9
+    number_count = len(number_like_tokens(text))
+    if number_count >= 3:
+        score += 0.5
+    elif number_count >= 1:
+        score += 0.25
+    if node.node_type == "table_row":
+        score += 0.7
+    elif node.node_type == "table_block":
+        score += 0.4
+    if has_structured_table_context(text) or has_structured_table_context(context):
+        score += 0.7
+    if has_question_section_prior(query, text) or has_question_section_prior(query, context):
+        score += 0.5
+    if looks_like_audit_or_narrative(text):
+        score -= 0.8
+    return score
+
+
+def page_context_by_page(nodes: list[EvidenceNode]) -> dict[str, str]:
+    grouped = group_nodes_by_page(nodes)
+    return {
+        page_id: " ".join(
+            node.text for node in sorted(page_nodes, key=lambda item: item.reading_order)
+        )
+        for page_id, page_nodes in grouped.items()
+    }
+
+
+def evidence_localization_score(
+    query: QueryRecord,
+    node: EvidenceNode,
+    coverage_slots: set[str],
+) -> float:
+    text = normalize_text(node.text)
+    score = 0.0
+    if query.question_type in {"numeric", "comparison"}:
+        if (
+            any(slot.startswith("metric:") for slot in coverage_slots)
+            and "numeric_shape" in coverage_slots
+        ):
+            score += 0.45
+        if any(slot.startswith("year:") for slot in coverage_slots) and any(
+            slot.startswith("unit:") for slot in coverage_slots
+        ):
+            score += 0.3
+        if has_structured_table_context(text):
+            score += 0.35
+        if node.node_type == "table_row":
+            score += 0.35
+        elif node.node_type == "table_block":
+            score += 0.2
+        if has_question_section_prior(query, text):
+            score += 0.25
+        if looks_like_audit_or_narrative(text):
+            score -= 0.35
+    elif is_cover_query(query):
+        page_index = safe_page_index(node)
+        if page_index == 1:
+            score += 0.8
+        if any(term in text for term in ("年度报告", "证券代码", "证券简称")):
+            score += 0.3
+    return score
+
+
+def matched_metric_aliases(query: QueryRecord, normalized_text: str) -> list[str]:
+    question = normalize_text(query.question)
+    aliases: list[str] = []
+    for _metric, metric_aliases in METRIC_ALIASES.items():
+        if any(alias in question for alias in metric_aliases):
+            aliases.extend(alias for alias in metric_aliases if alias in normalized_text)
+    return aliases
+
+
+def has_structured_table_context(text: str) -> bool:
+    table_terms = ("项目", "2024", "2025", "2023", "本年比上年", "同比", "单位")
+    return sum(1 for term in table_terms if term in text) >= 3
+
+
+def has_question_section_prior(query: QueryRecord, text: str) -> bool:
+    question = normalize_text(query.question)
+    if any(term in question for term in ("营业收入", "归属于上市公司股东的净利润", "资产总额")):
+        return any(term in text for term in ("主要会计数据", "财务指标", "本年比上年增减"))
+    if any(term in question for term in ("现金流量净额", "经营活动")):
+        return any(term in text for term in ("现金流量数据", "现金流量表", "经营活动"))
+    if any(term in question for term in ("研发投入", "研发费用")):
+        return any(term in text for term in ("研发投入", "研发费用", "研发人员", "研发支出"))
+    if any(term in question for term in ("同比", "增减幅度", "相比上年")):
+        return any(term in text for term in ("本年比上年增减", "同比", "增减"))
+    return False
+
+
+def looks_like_audit_or_narrative(text: str) -> bool:
+    negative_terms = ("关键审计事项", "审计", "管理层", "风险", "会计政策", "确认时点")
+    return sum(1 for term in negative_terms if term in text) >= 2
+
+
+def is_cover_query(query: QueryRecord) -> bool:
+    question = normalize_text(query.question)
+    return any(term in question for term in ("报告年度", "报告标题", "首页", "标题处"))
+
+
+def safe_page_index(node: EvidenceNode) -> int:
+    try:
+        return int(node.metadata.get("page_index", 999999))
+    except (TypeError, ValueError):
+        return 999999
+
+
+def extract_years(text: str) -> set[str]:
+    return set(re.findall(r"20\d{2}", text))
+
+
+def extract_units(question: str, metadata: dict[str, Any]) -> set[str]:
+    units: set[str] = set()
+    answer_unit = metadata.get("answer_unit")
+    if isinstance(answer_unit, str) and answer_unit.strip():
+        units.add(answer_unit.strip())
+    for unit in UNIT_TERMS:
+        if unit in question and not any(unit in selected for selected in units):
+            units.add(unit)
+    return units
+
+
+def needs_numeric_shape(query: QueryRecord) -> bool:
+    question = query.question
+    numeric_clues = ("多少", "增减", "幅度", "收入", "利润", "现金流", "资产", "负债", "研发")
+    return query.question_type in {"numeric", "comparison"} or any(
+        clue in question for clue in numeric_clues
+    )
+
+
+def has_numeric_shape(text: str) -> bool:
+    number_patterns = [
+        r"[(（]\s*[-+]?\d[\d,]*(?:\.\d+)?\s*[)）]",
+        r"[-+]?\d[\d,]*(?:\.\d+)?\s*%",
+        r"[-+]?\d[\d,]*(?:\.\d+)?\s*(?:元|万元|亿元|百分点)",
+        r"\d{1,3}(?:,\d{3})+(?:\.\d+)?",
+        r"[-+]?\d+\.\d+",
+    ]
+    return any(re.search(pattern, text) for pattern in number_patterns)
+
+
+def number_like_tokens(text: str) -> list[str]:
+    return re.findall(r"[-+]?[(（]?\d[\d,]*(?:\.\d+)?[)）]?%?", text)
+
+
+def text_has_unit(text: str, unit: str) -> bool:
+    if unit == "元":
+        return bool(re.search(r"(?<![万亿])元", text))
+    if unit == "%":
+        return "%" in text
+    return unit in text
+
+
+def extract_question_keywords(question: str) -> set[str]:
+    keywords: set[str] = set()
+    for metric, aliases in METRIC_ALIASES.items():
+        if any(alias in question for alias in aliases):
+            keywords.add(metric)
+    cleaned = re.sub(r"20\d{2}\s*年?度?", " ", question)
+    for token in re.findall(r"[\u4e00-\u9fffA-Za-z%]{2,}", cleaned):
+        token = token.strip()
+        if token in QUESTION_STOP_TERMS:
+            continue
+        if any(stop in token for stop in ("哪一年", "是多少", "是什么")):
+            continue
+        if len(token) > 12:
+            continue
+        keywords.add(token)
+    return set(sorted(keywords)[:6])
+
+
+def normalize_text(text: str) -> str:
+    return re.sub(r"\s+", "", text)
+
+
+def node_type_bonus(query: QueryRecord, node: EvidenceNode) -> float:
+    if query.question_type in {"numeric", "comparison"} and node.node_type == "table_row":
+        return 0.2
+    if query.question_type in {"risk_text", "text"} and node.node_type == "paragraph":
+        return 0.15
+    return 0.0
+
+
+def candidate_sources(candidate: EvidenceCandidate) -> list[str]:
+    sources = []
+    if candidate.from_page_candidate:
+        sources.append("hybrid_page")
+    if candidate.from_global_region:
+        sources.append("global_region")
+    if candidate.from_structured_scan:
+        sources.append("structured_numeric_scan")
+    if candidate.from_cover_anchor:
+        sources.append("cover_anchor")
+    return sources
+
+
+def selection_reason(candidate: EvidenceCandidate, slots: set[str], target_slots: set[str]) -> str:
+    slot_text = ",".join(sorted(slots)) if slots else "no_slot"
+    source_text = "+".join(candidate_sources(candidate)) or "candidate"
+    return f"{source_text}; coverage={len(slots)}/{len(target_slots)}; slots={slot_text}"
 
 
 def score_texts(
