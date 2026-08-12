@@ -4,7 +4,7 @@ from pathlib import Path
 from typing import Annotated
 
 import typer  # 现代、基于类型提示的 CLI 框架
-from rich.console import Console
+from rich.console import Console  # 用于在终端中输出富文本和精美格式
 from rich.table import Table
 
 from mmdocrag.datasets import build_cn_annotations, prepare_dataset
@@ -15,6 +15,7 @@ from mmdocrag.retrieval import run_retrieval
 
 # 进行实例创建
 app = typer.Typer(help="Multi-modal document evidence retrieval experiments.")
+# 从 rich 库中导入了 Console 类。Console 是 rich 库的核心组件，用于在终端中显示格式化的输出内容。
 console = Console()
 
 
@@ -47,6 +48,8 @@ def prepare(
         console.print("[bold]uv run mdr prepare --dataset demo[/bold]")
 
 
+# 用于生成中文年报的QA标注
+# uv run mdr build-cn-annotations --questions-per-doc 8 --limit-docs 20
 @app.command("build-cn-annotations")
 def build_cn_annotations_command(
     questions_per_doc: Annotated[int, typer.Option(help="Target QA rows per annual report.")] = 8,
@@ -55,8 +58,8 @@ def build_cn_annotations_command(
     ] = None,
 ) -> None:
     """Build V2 Chinese annual report QA annotations from local PDFs."""
-    output = build_cn_annotations(questions_per_doc=questions_per_doc, limit_docs=limit_docs)
-    console.print(f"[green]Chinese annual report V2 annotations written to:[/green] {output}")
+    output = build_cn_annotations(questions_per_doc=questions_per_doc, limit_docs=limit_docs)  # path 对象，生成的QA标注文件
+    console.print(f"[green]Chinese annual report V2 annotations written to:[/green] {output}")  # console.print 更精美的终端输出
 
 
 @app.command()

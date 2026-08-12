@@ -1,0 +1,4 @@
+interface:
+  display_name: "MMDoc Evidence Research"
+  short_description: "Keep long-document evidence research on scope"
+  default_prompt: "Use $mmdoc-evidence-research to analyze or extend this long-document evidence retrieval project without drifting from its thesis scope."

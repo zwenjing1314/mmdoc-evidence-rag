@@ -4,6 +4,46 @@
 
 当前阶段目标：先完成开题前可展示的最小实验闭环，而不是一次性铺满全部论文实验。
 
+## Project Skill
+
+本项目附带一个面向 Codex/大模型的研究 skill：
+
+```text
+skills/mmdoc-evidence-research/
+```
+
+它不是一个检索模型，也不会自动提升指标。它是一组项目专用的上下文规则，用来帮助大模型在分析代码、设计实验、修改模块和撰写论文内容时保持研究边界一致，特别是区分：
+
+- 已经写入源码的功能；
+- 文档中记录过但当前未必可复现的实验结果；
+- 仍然只是计划的可信生成、视觉检索和拒答功能。
+
+skill 的核心约束是围绕以下主线工作：
+
+```text
+文档解析 -> 证据节点 -> 页面检索 -> 区域定位 -> 证据集 -> 生成 -> 验证/拒答
+```
+
+### 使用方式
+
+skill 不需要启动服务，也没有单独的运行命令。Codex 会读取它的 YAML 头信息和 Markdown 指令，在任务匹配时加载它。`PyYAML` 只用于运行 skill 校验脚本，不参与 skill 的日常使用；本项目的 `pyproject.toml` 已经包含 `pyyaml` 依赖。
+
+在支持 Codex skill 的环境中，可以显式调用：
+
+```text
+$mmdoc-evidence-research 请分析当前 evidence set 实验的下一步
+```
+
+也可以直接提出与本项目相关的任务，让模型根据 skill 的描述自动判断是否使用。项目内的 `skills/` 版本适合提交到 Git，但是否会被当前 Codex 自动发现取决于宿主环境；最稳妥的做法是将该目录复制或链接到个人 skill 目录：
+
+```text
+~/.codex/skills/mmdoc-evidence-research
+```
+
+安装或更新后，通常新开一个 Codex 任务（或重新加载 skill 列表）即可；不需要运行 Python 程序。显式调用时，`$mmdoc-evidence-research` 是 skill 名称，不是 shell 变量。
+
+主规则见 [skills/mmdoc-evidence-research/SKILL.md](skills/mmdoc-evidence-research/SKILL.md)，详细研究边界和实验规范见其 `references/` 目录。
+
 ## Immediate Goal
 
 开题前优先完成：

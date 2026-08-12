@@ -362,9 +362,9 @@ def prepare_cn_annual_reports(limit_docs: int | None = None) -> PrepareResult:
 
 
 def build_cn_annotations(questions_per_doc: int = 8, limit_docs: int | None = None) -> Path:
-    dataset = "cn_annual_reports"
-    raw_dir = data_root() / "raw" / dataset
-    pdf_dir = raw_dir / "pdfs"
+    dataset = "cn_annual_reports"  # 中文年报数据集名称
+    raw_dir = data_root() / "raw" / dataset  # 中文年报数据集上一层路径
+    pdf_dir = raw_dir / "pdfs"  # 中文年报数据集地址
     pdfs = sorted(path for path in pdf_dir.glob("*.pdf") if path.is_file())
     if limit_docs is not None:
         pdfs = pdfs[:limit_docs]
@@ -375,10 +375,10 @@ def build_cn_annotations(questions_per_doc: int = 8, limit_docs: int | None = No
     skipped: list[str] = []
     query_index = 1
     for pdf in pdfs:
-        doc_id = pdf.stem
-        company = _company_name_from_doc_id(doc_id)
-        page_items = _extract_pdf_page_items(pdf)
-        page_texts = [_clean_text(str(item.get("text") or "")) for item in page_items]
+        doc_id = pdf.stem  # 获取不带 .pdf 扩展名的文件名
+        company = _company_name_from_doc_id(doc_id)  # 返回公司名称
+        page_items = _extract_pdf_page_items(pdf)  # 获取所有页面的内容 坐标和文本
+        page_texts = [_clean_text(str(item.get("text") or "")) for item in page_items]  # 获取所有页面的文本
         doc_rows, doc_skipped = _build_cn_doc_annotation_rows(
             doc_id=doc_id,
             company=company,
@@ -532,6 +532,7 @@ def _safe_pdf_page_count(path: Path) -> int:
         return 0
 
 
+# 从 PDF 文件中逐页提取文本内容，同时提取每一页内的文本块及其位置信息（bbox）。
 def _extract_pdf_page_items(path: Path) -> list[dict[str, Any]]:
     try:
         import fitz
@@ -545,7 +546,7 @@ def _extract_pdf_page_items(path: Path) -> list[dict[str, Any]]:
                 ):  # ← 第2层循环：遍历每个文本块  block 一般返回7个字段 x1, y1, x2, y2, text, block_no, block_type
                     if len(block) < 5:  # 字段小于等于 5，则忽略
                         continue
-                    text = _clean_text(str(block[4]))
+                    text = _clean_text(str(block[4]))  # 提取文本字段
                     if not text:
                         continue
                     blocks.append(
@@ -768,7 +769,7 @@ def _build_cn_doc_annotation_rows(
     rows: list[dict[str, Any]] = []
     skipped: list[str] = []
     first_page = page_texts[0] if page_texts else ""
-    year = _infer_report_year(doc_id, first_page)
+    year = _infer_report_year(doc_id, first_page)  # 尝试从页首文本中推断报告年份
     title = _infer_report_title(first_page, year)
 
     if year:
@@ -962,16 +963,18 @@ def _annotation_row(
     }
 
 
+# 返回公司名称
 def _company_name_from_doc_id(doc_id: str) -> str:
-    return doc_id.split("：", 1)[0].strip() or doc_id
+    return doc_id.split("：", 1)[0].strip() or doc_id  # 按中文冒号截取
 
 
+# 利用正则匹配获取年报年份信息
 def _infer_report_year(doc_id: str, first_page: str) -> str:
     text = f"{doc_id} {first_page}"
     match = re.search(r"(20\d{2})\s*年\s*年度报告", text)
     if match:
         return match.group(1)
-    match = re.search(r"(20\d{2})", text)
+    match = re.search(r"(20\d{2})", text)  # 如果上面不匹配，则尝试直接匹配数字兜底
     return match.group(1) if match else ""
 
 
