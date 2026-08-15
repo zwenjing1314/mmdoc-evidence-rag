@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import csv
 import json
+import os
 import re
 from dataclasses import dataclass
 from pathlib import Path
@@ -66,7 +67,7 @@ UNIT_PATTERN = re.compile(r"单位[：:]\s*([人民币元万元亿元百万元�
 def prepare_dataset(dataset: str, limit_docs: int | None = None) -> PrepareResult:
     if dataset == "demo":
         return prepare_demo(limit_docs=limit_docs)
-    if dataset == "mmdocir":
+    if dataset in {"mmdocir", "mmdocir_evaluation"}:
         return prepare_mmdocir(limit_docs=limit_docs)
     if dataset in {"cn_annual_reports", "cn_reports"}:
         return prepare_cn_annual_reports(limit_docs=limit_docs)
@@ -215,18 +216,39 @@ def prepare_demo(limit_docs: int | None = None) -> PrepareResult:
 
 
 def prepare_mmdocir(limit_docs: int | None = None) -> PrepareResult:
-    dataset = "mmdocir"
-    raw_dir = data_root() / "raw" / dataset
+    dataset = "mmdocir_evaluation"
+    raw_dir = Path(os.getenv("MMDOCIR_EVALUATION_ROOT", data_root() / "raw" / dataset))
     processed_dir = data_root() / "processed" / dataset
-    raw_files = _visible_files(raw_dir)
-    if not raw_files:
+    annotations_path = raw_dir / "MMDocIR_annotations.jsonl"
+    pages_path = raw_dir / "MMDocIR_pages.parquet"
+    layouts_path = raw_dir / "MMDocIR_layouts.parquet"
+    if not all(path.exists() for path in (annotations_path, pages_path, layouts_path)):
         _write_missing_data_note(
             processed_dir,
-            "MMDocIR raw data not found. Put downloaded files under data/raw/mmdocir or run `mdr prepare --dataset demo`.",
+            "MMDocIR evaluation files not found. Set MMDOCIR_EVALUATION_ROOT to the downloaded dataset directory.",
         )
         return PrepareResult(dataset, processed_dir, 0, 0, 0, 0, "MMDocIR raw data not found.")
 
-    documents, pages, nodes, queries = _generic_prepare_from_tables(dataset, raw_files, limit_docs)
+    annotations = [json.loads(line) for line in annotations_path.read_text(encoding="utf-8").splitlines() if line]
+    if limit_docs is not None:
+        annotations = annotations[:limit_docs]
+    doc_ids = {Path(item["doc_name"]).stem for item in annotations}
+    page_frame = pl.read_parquet(pages_path).with_columns(pl.col("doc_name").str.replace(r"\.pdf$", "").alias("doc_id"))
+    layout_frame = pl.read_parquet(layouts_path).with_columns(pl.col("doc_name").str.replace(r"\.pdf$", "").alias("doc_id"))
+    page_rows = page_frame.filter(pl.col("doc_id").is_in(doc_ids)).to_dicts()
+    layout_rows = layout_frame.filter(pl.col("doc_id").is_in(doc_ids)).to_dicts()
+    def page_id(doc_id: str, index: int) -> str: return f"{doc_id}_p{index}"
+    def bbox_key(bbox: list[float]) -> tuple[float, ...]: return tuple(round(float(value), 2) for value in bbox)
+    pages = [PageRecord(doc_id=row["doc_id"], page_id=page_id(row["doc_id"], int(row["passage_id"])), page_index=int(row["passage_id"]) + 1, page_text=str(row.get("ocr_text") or row.get("vlm_text") or ""), metadata={"domain": row.get("domain", "")}) for row in page_rows]
+    nodes = [EvidenceNode(node_id=f"{row['doc_id']}_p{row['page_id']}_l{row['layout_id']}", doc_id=row["doc_id"], page_id=page_id(row["doc_id"], int(row["page_id"])), node_type="table_block" if row["type"] == "table" else "figure" if row["type"] == "figure" else "paragraph", bbox=row["bbox"], text=str(row.get("text") or row.get("ocr_text") or row.get("vlm_text") or ""), source="mmdocir") for row in layout_rows]
+    lookup = {(node.doc_id, node.page_id, bbox_key(node.bbox or [])): node.node_id for node in nodes}
+    documents = [DocumentRecord(doc_id=doc_id, dataset=dataset, title=doc_id, domain=next((str(item.get("domain", "")) for item in annotations if Path(item["doc_name"]).stem == doc_id), ""), num_pages=sum(page.doc_id == doc_id for page in pages)) for doc_id in sorted(doc_ids)]
+    queries = []
+    for item in annotations:
+        doc_id = Path(item["doc_name"]).stem
+        for question in item["questions"]:
+            mappings = question.get("layout_mapping", [])
+            queries.append(QueryRecord(query_id=f"mmdocir_{len(queries):05d}", dataset=dataset, doc_id=doc_id, question=question["Q"], answer=str(question.get("A", "")), question_type=str(question.get("type", "")), evidence_page_ids=[page_id(doc_id, int(value)) for value in question.get("page_id", [])], evidence_node_ids=[lookup[(doc_id, page_id(doc_id, int(mapping["page"])), bbox_key(mapping["bbox"]))] for mapping in mappings if (doc_id, page_id(doc_id, int(mapping["page"])), bbox_key(mapping["bbox"])) in lookup], metadata={"mmdocir_layout_count": len(mappings)}))
     write_processed_dataset(processed_dir, documents, pages, nodes, queries)
     return PrepareResult(
         dataset,
