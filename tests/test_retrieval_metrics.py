@@ -469,6 +469,34 @@ def test_evidence_set_selects_two_nodes_when_unit_and_value_are_split():
     assert {candidate.node.node_id for candidate in selected[:2]} == {"n1", "n2"}
 
 
+def test_evidence_set_single_node_mode_disables_greedy_selection():
+    candidates = [
+        EvidenceCandidate(
+            node=EvidenceNode(
+                node_id="high", doc_id="doc1", page_id="p1", text="高分节点"
+            ),
+            combined_score=2.0,
+        ),
+        EvidenceCandidate(
+            node=EvidenceNode(
+                node_id="low", doc_id="doc1", page_id="p1", text="低分节点"
+            ),
+            combined_score=1.0,
+        ),
+    ]
+
+    selected = select_minimal_evidence_set(
+        candidates, {"metric:营业收入"}, 2, 2, selection_mode="single_node"
+    )
+
+    assert [item.node.node_id for item in selected] == ["high", "low"]
+
+
+def test_evidence_set_rejects_unknown_selection_mode():
+    with pytest.raises(ValueError, match="selection_mode"):
+        retrieve_evidence_set_region([], [], [], {"selection_mode": "unknown"})
+
+
 def test_evidence_set_does_not_rank_by_gold_answer_value():
     query = QueryRecord(
         query_id="q1",

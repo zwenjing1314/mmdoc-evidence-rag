@@ -753,6 +753,14 @@ def retrieve_evidence_set_region(
     cover_anchor_top_k = int(retriever.get("cover_anchor_top_k", 8))
     output_top_k = int(retriever.get("output_top_k", retriever.get("region_top_k", 5)))
     max_evidence_nodes = int(retriever.get("max_evidence_nodes", 3))
+    use_hybrid_page = bool(retriever.get("use_hybrid_page", True))
+    use_global_region = bool(retriever.get("use_global_region", True))
+    use_structured_scan = bool(retriever.get("use_structured_scan", True))
+    use_cover_anchor = bool(retriever.get("use_cover_anchor", True))
+    use_slot_coverage = bool(retriever.get("use_slot_coverage", True))
+    selection_mode = str(retriever.get("selection_mode", "greedy"))
+    if selection_mode not in {"greedy", "single_node"}:
+        raise ValueError("selection_mode must be `greedy` or `single_node`.")
     encoder = str(retriever.get("encoder", "BAAI/bge-m3"))
     region_method = normalize_retrieval_method(
         retriever.get("region_method", retriever.get("method", retriever.get("region_retriever"))),
@@ -763,19 +771,27 @@ def retrieve_evidence_set_region(
     nodes_by_doc = group_nodes_by_doc(selected_nodes)
     nodes_by_id = {node.node_id: node for node in selected_nodes}
 
-    page_hits = retrieve_hybrid_pages(
-        queries,
-        pages,
-        {**retriever, "page_top_k": page_top_k, "top_k": page_top_k},
+    page_hits = (
+        retrieve_hybrid_pages(
+            queries,
+            pages,
+            {**retriever, "page_top_k": page_top_k, "top_k": page_top_k},
+        )
+        if use_hybrid_page
+        else []
     )
-    global_hits = retrieve_global_region(
-        queries,
-        selected_nodes,
-        {
-            **retriever,
-            "method": region_method,
-            "region_top_k": global_region_top_k,
-        },
+    global_hits = (
+        retrieve_global_region(
+            queries,
+            selected_nodes,
+            {
+                **retriever,
+                "method": region_method,
+                "region_top_k": global_region_top_k,
+            },
+        )
+        if use_global_region
+        else []
     )
     page_hits_by_query = group_retrieval_hits(page_hits)
     global_hits_by_query = group_retrieval_hits(global_hits)
@@ -789,18 +805,20 @@ def retrieve_evidence_set_region(
             nodes_by_page,
             nodes_by_id,
         )
-        add_structured_scan_candidates(
-            query,
-            nodes_by_doc.get(query.doc_id, []),
-            candidates,
-            top_k=structured_scan_top_k,
-        )
-        add_cover_anchor_candidates(
-            query,
-            nodes_by_doc.get(query.doc_id, []),
-            candidates,
-            top_k=cover_anchor_top_k,
-        )
+        if use_structured_scan:
+            add_structured_scan_candidates(
+                query,
+                nodes_by_doc.get(query.doc_id, []),
+                candidates,
+                top_k=structured_scan_top_k,
+            )
+        if use_cover_anchor:
+            add_cover_anchor_candidates(
+                query,
+                nodes_by_doc.get(query.doc_id, []),
+                candidates,
+                top_k=cover_anchor_top_k,
+            )
         if not candidates:
             continue
 
@@ -824,13 +842,16 @@ def retrieve_evidence_set_region(
 
         target_slots = query_target_slots(query)
         for candidate in candidates.values():
-            score_evidence_candidate(query, candidate, target_slots)
+            score_evidence_candidate(
+                query, candidate, target_slots, use_slot_coverage=use_slot_coverage
+            )
 
         selected = select_minimal_evidence_set(
             list(candidates.values()),
-            target_slots,
+            target_slots if use_slot_coverage else set(),
             max_evidence_nodes=max_evidence_nodes,
             output_top_k=output_top_k,
+            selection_mode=selection_mode,
         )
         covered_slots: set[str] = set()
         evidence_count = min(len(selected), max_evidence_nodes)
@@ -975,6 +996,7 @@ def score_evidence_candidate(
     query: QueryRecord,
     candidate: EvidenceCandidate,
     target_slots: set[str],
+    use_slot_coverage: bool = True,
 ) -> None:
     text = normalize_text(candidate.node.text)
     coverage_slots: set[str] = set()
@@ -1010,6 +1032,7 @@ def score_evidence_candidate(
     candidate.coverage_slots = coverage_slots
     candidate.coverage_score = coverage_ratio
     candidate.localization_score = localization_score
+    coverage_bonus = coverage_ratio * 1.5 + len(coverage_slots) * 0.08 if use_slot_coverage else 0.0
     candidate.combined_score = (
         semantic_rank_score
         + page_bonus
@@ -1017,8 +1040,7 @@ def score_evidence_candidate(
         + structured_bonus
         + structured_quality_bonus
         + cover_bonus
-        + coverage_ratio * 1.5
-        + len(coverage_slots) * 0.08
+        + coverage_bonus
         + localization_score
         + type_bonus
     )
@@ -1029,8 +1051,11 @@ def select_minimal_evidence_set(
     target_slots: set[str],
     max_evidence_nodes: int,
     output_top_k: int,
+    selection_mode: str = "greedy",
 ) -> list[EvidenceCandidate]:
     remaining = sorted(candidates, key=lambda item: item.combined_score, reverse=True)
+    if selection_mode == "single_node":
+        return remaining[:output_top_k]
     selected: list[EvidenceCandidate] = []
     covered: set[str] = set()
     while remaining and len(selected) < max_evidence_nodes and covered != target_slots:
