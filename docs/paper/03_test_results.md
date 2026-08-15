@@ -30,7 +30,18 @@
 
 核心解释：`w/o Slot Coverage` 和 `Single-node` 的 Region Hit@5 更高，但完整充分率显著更低。这表明单一 gold node 命中不能代表返回证据集足以支撑财务问答；本文方法的目标是充分证据集，而不是单节点命中最大化。
 
-## 3. 对应运行目录
+## 3. 节点粒度消融
+
+| 节点类型 | Region Hit@5 | Sufficiency Rate | Required Item Coverage |
+| --- | ---: | ---: | ---: |
+| paragraph-only | 0.2500 | 0.2500 | 0.7422 |
+| table_block-only | 0.2500 | 0.1562 | 0.8984 |
+| table_row-only | 0.5938 | 0.0938 | 0.6719 |
+| **mixed-node（完整方法）** | **0.8750** | **0.8750** | **0.9688** |
+
+混合节点同时保留叙述型段落、表格上下文和精细表格行。仅使用一种节点类型会丢失其他证据形态，不能稳定支持财务问答。
+
+## 4. 对应运行目录
 
 | 结果 | 运行目录 |
 | --- | --- |
@@ -47,9 +58,12 @@
 | w/o Numeric Scan | `runs/retrieval/cn_evidence_set_region_wo_numeric_scan/test/20260815_202335` |
 | w/o Slot Coverage | `runs/retrieval/cn_evidence_set_region_wo_slot_coverage/test/20260815_202617` |
 | Single-node | `runs/retrieval/cn_evidence_set_region_single_node/test/20260815_202937` |
+| paragraph-only | `runs/retrieval/cn_evidence_set_region_paragraph_only/test/20260815_211531` |
+| table_block-only | `runs/retrieval/cn_evidence_set_region_table_block_only/test/20260815_211802` |
+| table_row-only | `runs/retrieval/cn_evidence_set_region_table_row_only/test/20260815_211945` |
 
-## 4. 当前边界
+## 5. 当前边界
 
 1. test 仅含 32 个问题，主表应补充 bootstrap 置信区间或配对显著性检验。
 2. 充分性评价是规则式“指标-年份-单位-数值-引用”检查，应增加人工抽样审计。
-3. 仍需完成节点粒度消融和至少一个公开数据集验证，才适合作为小论文的完整实验部分。
+3. 仍需完成至少一个公开数据集验证，才适合作为小论文的完整实验部分。

@@ -1,0 +1,24 @@
+experiment_name: cn_evidence_set_region_paragraph_only
+dataset: cn_annual_reports
+data_split:
+  manifest: configs/splits/cn_annual_reports_company_v1.yaml
+  name: test
+retriever:
+  type: evidence_set_region
+  search_scope: document
+  page_methods: [bm25, dense]
+  encoder: BAAI/bge-small-zh-v1.5
+  require_model: true
+  dense_max_seq_length: 128
+  dense_batch_size: 8
+  candidate_top_k: 20
+  page_top_k: 10
+  global_region_top_k: 20
+  structured_scan_top_k: 20
+  cover_anchor_top_k: 8
+  region_method: dense
+  region_top_k: 5
+  output_top_k: 5
+  max_evidence_nodes: 3
+  node_types: [paragraph]
+output_dir: runs/retrieval/cn_evidence_set_region_paragraph_only
