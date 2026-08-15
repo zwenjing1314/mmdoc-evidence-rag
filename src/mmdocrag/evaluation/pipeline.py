@@ -8,14 +8,14 @@ import polars as pl
 from mmdocrag.evaluation.metrics import evaluate_metrics, group_hits
 from mmdocrag.io import read_hits, read_processed_dataset
 from mmdocrag.paths import data_root
+from mmdocrag.retrieval.pipeline import apply_data_split
 from mmdocrag.schemas import QueryRecord, RetrievalHit
 
 
 def evaluate_run(run: Path) -> dict[str, float]:
     run_dir = resolve_run_dir(run)
     run_info = json.loads((run_dir / "run_info.json").read_text(encoding="utf-8"))
-    dataset = run_info["dataset"]
-    _, _, _, queries = read_processed_dataset(data_root() / "processed" / dataset)
+    queries = load_run_queries(run_dir, run_info)
     hits = read_hits(run_dir / "predictions.parquet")
     metrics = evaluate_metrics(queries, hits)
     (run_dir / "metrics.json").write_text(
@@ -24,6 +24,27 @@ def evaluate_run(run: Path) -> dict[str, float]:
     write_errors(run_dir / "errors.csv", queries, hits)
     write_summary(run_dir / "summary.md", run_info, metrics, queries, hits)
     return metrics
+
+
+def load_run_queries(run_dir: Path, run_info: dict) -> list[QueryRecord]:
+    """Load exactly the query split that produced a retrieval run."""
+    dataset = str(run_info["dataset"])
+    documents, pages, nodes, queries = read_processed_dataset(data_root() / "processed" / dataset)
+    split_info = run_info.get("data_split")
+    if not split_info:
+        return queries
+    split_manifest = run_dir / "data_split.yaml"
+    if not split_manifest.exists():
+        raise FileNotFoundError(f"Missing split manifest copied with retrieval run: {split_manifest}")
+    _, _, _, filtered_queries, _, _ = apply_data_split(
+        {"data_split": {"manifest": str(split_manifest), "name": split_info["name"]}},
+        dataset,
+        documents,
+        pages,
+        nodes,
+        queries,
+    )
+    return filtered_queries
 
 
 def resolve_run_dir(run: Path) -> Path:

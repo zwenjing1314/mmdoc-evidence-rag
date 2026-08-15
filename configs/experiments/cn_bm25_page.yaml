@@ -1,5 +1,8 @@
 experiment_name: cn_bm25_page
 dataset: cn_annual_reports
+data_split:
+  manifest: configs/splits/cn_annual_reports_company_v1.yaml
+  name: test
 retriever:
   type: bm25_page
   search_scope: document

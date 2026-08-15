@@ -6,6 +6,7 @@ import re
 import shutil
 from dataclasses import dataclass
 from datetime import datetime
+from hashlib import sha256
 from pathlib import Path
 from typing import Any
 
@@ -90,17 +91,22 @@ class EvidenceCandidate:
     combined_score: float = 0.0
 
 
-def run_retrieval(config_path: Path) -> Path:
+def run_retrieval(config_path: Path, split_name: str | None = None) -> Path:
     config = load_config(config_path)
     dataset = str(config["dataset"])
     retriever = config.get("retriever", {})
     retriever_type = str(retriever.get("type", "bm25_page"))
     experiment_name = str(config.get("experiment_name", f"{dataset}_{retriever_type}"))
     processed_dir = data_root() / "processed" / dataset
-    _, pages, nodes, queries = read_processed_dataset(processed_dir)  # 读取数据
+    documents, pages, nodes, queries = read_processed_dataset(processed_dir)
+    documents, pages, nodes, queries, split_info, split_manifest = apply_data_split(
+        config, dataset, documents, pages, nodes, queries, split_name
+    )
     output_root = resolve_project_path(
         config.get("output_dir", f"runs/retrieval/{experiment_name}")
     )  # 输出目录
+    if split_info is not None:
+        output_root = output_root / str(split_info["name"])
     run_dir = output_root / datetime.now().strftime(
         "%Y%m%d_%H%M%S"
     )  # 根据时间创建新文件夹放到 output_root 文件夹下
@@ -155,6 +161,8 @@ def run_retrieval(config_path: Path) -> Path:
     (run_dir / "config.json").write_text(
         json.dumps(config, indent=2, ensure_ascii=False), encoding="utf-8"
     )
+    if split_manifest is not None:
+        shutil.copy2(split_manifest, run_dir / "data_split.yaml")
     (run_dir / "run_info.json").write_text(
         json.dumps(
             {
@@ -163,6 +171,7 @@ def run_retrieval(config_path: Path) -> Path:
                 "retriever_type": retriever_type,
                 "hits": len(hits),
                 "actual_retrievers": sorted({hit.retriever for hit in hits}),
+                "data_split": split_info,
             },
             indent=2,
             ensure_ascii=False,
@@ -171,6 +180,95 @@ def run_retrieval(config_path: Path) -> Path:
     )
     update_latest(output_root, run_dir)
     return run_dir
+
+
+def apply_data_split(
+    config: dict[str, Any],
+    dataset: str,
+    documents: list[Any],
+    pages: list[PageRecord],
+    nodes: list[EvidenceNode],
+    queries: list[QueryRecord],
+    split_override: str | None = None,
+) -> tuple[
+    list[Any], list[PageRecord], list[EvidenceNode], list[QueryRecord], dict[str, Any] | None, Path | None
+]:
+    """Filter a processed dataset by the immutable document-level split manifest."""
+    split_config = config.get("data_split")
+    if not split_config:
+        if split_override is not None:
+            raise ValueError("`--split` requires a `data_split.manifest` in the experiment config.")
+        return documents, pages, nodes, queries, None, None
+
+    manifest_value = split_config.get("manifest")
+    if not manifest_value:
+        raise ValueError("`data_split.manifest` is required when data_split is configured.")
+    manifest_path = resolve_project_path(manifest_value)
+    if not manifest_path.exists():
+        raise FileNotFoundError(f"Missing data split manifest: {manifest_path}")
+    manifest = load_config(manifest_path)
+    if str(manifest.get("dataset", "")) != dataset:
+        raise ValueError(
+            f"Split manifest dataset `{manifest.get('dataset')}` does not match experiment dataset `{dataset}`."
+        )
+    qa_source = manifest.get("qa_source")
+    qa_source_hash = manifest.get("qa_source_sha256")
+    if qa_source and qa_source_hash:
+        qa_source_path = resolve_project_path(str(qa_source))
+        if not qa_source_path.exists():
+            raise FileNotFoundError(f"Missing frozen QA source: {qa_source_path}")
+        actual_qa_hash = sha256(qa_source_path.read_bytes()).hexdigest()
+        if actual_qa_hash != str(qa_source_hash):
+            raise ValueError(
+                "Frozen QA source hash does not match the split manifest. "
+                "Do not run paper experiments until the data version is resolved."
+            )
+
+    split_name = str(split_override or split_config.get("name", "test"))
+    splits = manifest.get("splits")
+    if not isinstance(splits, dict) or split_name not in splits:
+        available = ", ".join(sorted(splits)) if isinstance(splits, dict) else "none"
+        raise ValueError(f"Unknown data split `{split_name}`. Available splits: {available}.")
+    if split_name == "test" and manifest.get("test_status") != "frozen":
+        raise ValueError("The requested test split is not marked as frozen in its manifest.")
+
+    split_docs = {name: [str(doc_id) for doc_id in doc_ids] for name, doc_ids in splits.items()}
+    declared_doc_ids = [doc_id for doc_ids in split_docs.values() for doc_id in doc_ids]
+    if len(declared_doc_ids) != len(set(declared_doc_ids)):
+        raise ValueError("A document appears in more than one split.")
+    available_doc_ids = {document.doc_id for document in documents}
+    if set(declared_doc_ids) != available_doc_ids:
+        missing = sorted(available_doc_ids - set(declared_doc_ids))
+        unknown = sorted(set(declared_doc_ids) - available_doc_ids)
+        raise ValueError(f"Split manifest does not match processed documents. Missing={missing}; unknown={unknown}.")
+
+    selected_doc_ids = set(split_docs[split_name])
+    filtered_documents = [document for document in documents if document.doc_id in selected_doc_ids]
+    filtered_pages = [page for page in pages if page.doc_id in selected_doc_ids]
+    filtered_nodes = [node for node in nodes if node.doc_id in selected_doc_ids]
+    filtered_queries = [query for query in queries if query.doc_id in selected_doc_ids]
+    if not filtered_queries:
+        raise ValueError(f"Data split `{split_name}` contains no queries.")
+
+    manifest_hash = sha256(manifest_path.read_bytes()).hexdigest()
+    project_path = resolve_project_path(".")
+    try:
+        manifest_reference = str(manifest_path.relative_to(project_path))
+    except ValueError:
+        manifest_reference = str(manifest_path)
+    split_info = {
+        "name": split_name,
+        "manifest": manifest_reference,
+        "manifest_sha256": manifest_hash,
+        "test_status": manifest.get("test_status"),
+        "qa_source": qa_source,
+        "qa_source_sha256": qa_source_hash,
+        "document_count": len(filtered_documents),
+        "page_count": len(filtered_pages),
+        "node_count": len(filtered_nodes),
+        "query_count": len(filtered_queries),
+    }
+    return filtered_documents, filtered_pages, filtered_nodes, filtered_queries, split_info, manifest_path
 
 
 # 返回yaml文件中top_k中最大值

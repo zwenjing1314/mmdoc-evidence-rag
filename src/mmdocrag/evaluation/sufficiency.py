@@ -9,9 +9,8 @@ from typing import Any
 import polars as pl
 
 from mmdocrag.evaluation.metrics import group_hits, region_hit_at_k
-from mmdocrag.evaluation.pipeline import resolve_run_dir
-from mmdocrag.io import read_hits, read_processed_dataset
-from mmdocrag.paths import data_root
+from mmdocrag.evaluation.pipeline import load_run_queries, resolve_run_dir
+from mmdocrag.io import read_hits
 from mmdocrag.retrieval.pipeline import METRIC_ALIASES, query_target_slots, text_has_unit
 from mmdocrag.schemas import QueryRecord, RetrievalHit
 
@@ -36,8 +35,7 @@ class SufficiencyResult:
 def verify_evidence_run(run: Path, top_k: int = 3) -> dict[str, float]:
     run_dir = resolve_run_dir(run)
     run_info = json.loads((run_dir / "run_info.json").read_text(encoding="utf-8"))
-    dataset = str(run_info["dataset"])
-    _, _, _, queries = read_processed_dataset(data_root() / "processed" / dataset)
+    queries = load_run_queries(run_dir, run_info)
     hits = read_hits(run_dir / "predictions.parquet")
     results = verify_evidence_sufficiency(queries, hits, top_k=top_k)
     metrics = sufficiency_metrics(queries, hits, results, top_k=top_k)

@@ -65,11 +65,15 @@ def build_cn_annotations_command(
 @app.command()
 def retrieve(
     config: Annotated[Path, typer.Option(help="Experiment config path.")] = ...,
+    split: Annotated[
+        str | None,
+        typer.Option(help="Optional data split override, for example train, dev, or test."),
+    ] = None,
 ) -> None:
     """Run retrieval for an experiment config."""
     config_path = resolve_project_path(config)  # 获取配置文件的绝对路径
     try:
-        run_dir = run_retrieval(config_path)
+        run_dir = run_retrieval(config_path, split_name=split)
     except FileNotFoundError as exc:
         console.print(f"[red]{exc}[/red]")
         console.print("[yellow]If raw data is not ready, run the demo flow first:[/yellow]")

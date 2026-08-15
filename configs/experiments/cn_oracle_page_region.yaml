@@ -1,5 +1,8 @@
 experiment_name: cn_oracle_page_region
 dataset: cn_annual_reports
+data_split:
+  manifest: configs/splits/cn_annual_reports_company_v1.yaml
+  name: test
 retriever:
   type: oracle_page_region
   search_scope: document

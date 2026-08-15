@@ -1,0 +1,35 @@
+# Frozen document-level split for the small-paper experiments.
+# The reviewed annotation file is the canonical QA source:
+# data/raw/cn_annual_reports/qa_annotations_v2_reviewed.csv
+version: 1
+dataset: cn_annual_reports
+split_unit: document
+split_seed: 20260814
+test_status: frozen
+qa_source: data/raw/cn_annual_reports/qa_annotations_v2_reviewed.csv
+qa_source_sha256: 553b76d1428ad430e43056e9ca2380f15fce5bb6ca69ce58e995342a805d1d95
+
+splits:
+  train:
+    - 京东方Ａ：2025年年度报告
+    - 工业富联：富士康工业互联网股份有限公司2025年年度报告
+    - 紫光国微：2025年年度报告
+    - 寒武纪：2025年年度报告
+    - 韦尔股份：2024年年度报告
+    - 万科A：2025年年度报告
+    - 比亚迪：2025年年度报告
+    - 中际旭创：2025年年度报告
+    - 立讯精密：2025年年度报告
+    - 贵州茅台：贵州茅台2025年年度报告
+    - 浪潮信息：2025年年度报告
+    - 隆基绿能：2025年年度报告
+  dev:
+    - 格力电器：2025年年度报告
+    - 海光信息：海光信息技术股份有限公司2025年年度报告
+    - 科大讯飞：2025年年度报告
+    - 金山办公：金山办公2025年年度报告
+  test:
+    - 爱尔眼科：2025年年度报告
+    - 三安光电：三安光电股份有限公司2025年年度报告
+    - 迈瑞医疗：2025年年度报告
+    - 海康威视：2025年年度报告
