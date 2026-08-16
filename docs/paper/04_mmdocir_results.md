@@ -36,3 +36,5 @@ uv run --no-sync mdr evaluate --run runs/retrieval/mmdocir_layout_node_bge_m3/la
 ```
 
 MMDocIR 中只有 1,598/1,658 个问题存在精确布局金标，评估输出会额外报告 `region_gold_queries=1598`，布局级 MRR/nDCG 只在这 1,598 个 eligible queries 上计算。
+
+检索日志每行末尾的 `experiment_elapsed` 是从本次实验启动到当前步骤的累计秒数；文档进度中的 `elapsed` 是当前检索循环的局部计时，二者应以 `experiment_elapsed` 作为正式耗时记录。

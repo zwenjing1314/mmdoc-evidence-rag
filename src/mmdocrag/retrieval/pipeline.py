@@ -20,11 +20,26 @@ from mmdocrag.schemas import EvidenceNode, PageRecord, QueryRecord, RetrievalHit
 SEARCH_SCOPE_CORPUS = "corpus"
 SEARCH_SCOPE_DOCUMENT = "document"
 _SENTENCE_TRANSFORMER_CACHE: dict[str, Any] = {}
+_ACTIVE_RETRIEVAL_STARTED_AT: float | None = None
 
 
 def log_retrieval(message: str) -> None:
     """Print progress immediately so long-running CPU retrieval is observable."""
-    print(f"[mdr] {message}", flush=True)
+    if _ACTIVE_RETRIEVAL_STARTED_AT is None:
+        print(f"[mdr] {message}", flush=True)
+        return
+    elapsed = time.monotonic() - _ACTIVE_RETRIEVAL_STARTED_AT
+    print(
+        f"[mdr] {message} | experiment_elapsed={elapsed:.1f}s ({format_elapsed(elapsed)})",
+        flush=True,
+    )
+
+
+def format_elapsed(seconds: float) -> str:
+    """Format an elapsed duration for quick reading in long terminal runs."""
+    hours, remainder = divmod(max(0.0, seconds), 3600)
+    minutes, seconds_remainder = divmod(remainder, 60)
+    return f"{int(hours):02d}:{int(minutes):02d}:{seconds_remainder:04.1f}"
 
 
 def progress_interval(total: int) -> int:
@@ -123,7 +138,9 @@ class EvidenceCandidate:
 
 
 def run_retrieval(config_path: Path, split_name: str | None = None) -> Path:
+    global _ACTIVE_RETRIEVAL_STARTED_AT
     started_at = time.monotonic()
+    _ACTIVE_RETRIEVAL_STARTED_AT = started_at
     config = load_config(config_path)
     dataset = str(config["dataset"])
     retriever = config.get("retriever", {})
@@ -221,6 +238,7 @@ def run_retrieval(config_path: Path, split_name: str | None = None) -> Path:
     )
     update_latest(output_root, run_dir)
     log_retrieval(f"Results are ready in {run_dir}.")
+    _ACTIVE_RETRIEVAL_STARTED_AT = None
     return run_dir
 
 
