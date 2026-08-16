@@ -4,6 +4,7 @@ import json
 import os
 import re
 import shutil
+import time
 from dataclasses import dataclass
 from datetime import datetime
 from hashlib import sha256
@@ -19,6 +20,36 @@ from mmdocrag.schemas import EvidenceNode, PageRecord, QueryRecord, RetrievalHit
 SEARCH_SCOPE_CORPUS = "corpus"
 SEARCH_SCOPE_DOCUMENT = "document"
 _SENTENCE_TRANSFORMER_CACHE: dict[str, Any] = {}
+
+
+def log_retrieval(message: str) -> None:
+    """Print progress immediately so long-running CPU retrieval is observable."""
+    print(f"[mdr] {message}", flush=True)
+
+
+def progress_interval(total: int) -> int:
+    """Emit about 20 updates, while still reporting small experiments per document."""
+    return max(1, min(10, total // 20))
+
+
+def progress_timing(index: int, total: int, started_at: float) -> str:
+    elapsed = time.monotonic() - started_at
+    if index <= 1:
+        return f"elapsed {elapsed:.1f}s; estimating remaining time after this document."
+    average_per_document = elapsed / (index - 1)
+    remaining = average_per_document * (total - index + 1)
+    return f"elapsed {elapsed:.1f}s; estimated remaining {remaining:.1f}s."
+
+
+def release_mps_cache() -> None:
+    """Release temporary tensors between documents on memory-constrained Apple MPS."""
+    try:
+        import torch
+
+        if torch.backends.mps.is_available():
+            torch.mps.empty_cache()
+    except (ImportError, AttributeError):
+        return
 
 METRIC_ALIASES: dict[str, tuple[str, ...]] = {
     "营业收入": ("营业收入", "营收"),
@@ -92,6 +123,7 @@ class EvidenceCandidate:
 
 
 def run_retrieval(config_path: Path, split_name: str | None = None) -> Path:
+    started_at = time.monotonic()
     config = load_config(config_path)
     dataset = str(config["dataset"])
     retriever = config.get("retriever", {})
@@ -112,6 +144,10 @@ def run_retrieval(config_path: Path, split_name: str | None = None) -> Path:
     )  # 根据时间创建新文件夹放到 output_root 文件夹下
     run_dir.mkdir(parents=True, exist_ok=True)
     search_scope = normalize_search_scope(retriever)
+    log_retrieval(
+        f"Starting {experiment_name}: {len(queries)} queries, {len(pages)} pages, "
+        f"scope={search_scope}, retriever={retriever_type}."
+    )
 
     if retriever_type == "bm25_page":
         hits = retrieve_pages(
@@ -157,6 +193,11 @@ def run_retrieval(config_path: Path, split_name: str | None = None) -> Path:
     else:
         raise ValueError(f"Unsupported retriever type: {retriever_type}")
 
+    log_retrieval(
+        f"Retrieval finished: {len(hits)} hits generated in {time.monotonic() - started_at:.1f}s. "
+        "Writing result files..."
+    )
+
     write_hits(run_dir / "predictions.parquet", hits)
     (run_dir / "config.json").write_text(
         json.dumps(config, indent=2, ensure_ascii=False), encoding="utf-8"
@@ -179,6 +220,7 @@ def run_retrieval(config_path: Path, split_name: str | None = None) -> Path:
         encoding="utf-8",
     )
     update_latest(output_root, run_dir)
+    log_retrieval(f"Results are ready in {run_dir}.")
     return run_dir
 
 
@@ -401,19 +443,30 @@ def retrieve_pages(
     if search_scope == SEARCH_SCOPE_DOCUMENT:
         pages_by_doc = group_pages_by_doc(pages)
         hits: list[RetrievalHit] = []
-        for doc_id, doc_queries in group_queries_by_doc(queries).items():
-            hits.extend(
-                retrieve_pages(
-                    doc_queries,
-                    pages_by_doc.get(doc_id, []),
-                    method,
-                    top_k,
-                    encoder,
-                    require_dense_model=require_dense_model,
-                    dense_batch_size=dense_batch_size,
-                    dense_max_seq_length=dense_max_seq_length,
+        queries_by_doc = group_queries_by_doc(queries)
+        total_documents = len(queries_by_doc)
+        started_at = time.monotonic()
+        interval = progress_interval(total_documents)
+        for index, (doc_id, doc_queries) in enumerate(queries_by_doc.items(), start=1):
+            if method == "dense" and (index == 1 or index % interval == 0 or index == total_documents):
+                log_retrieval(
+                    f"Dense page retrieval: document {index}/{total_documents}; "
+                    f"{len(doc_queries)} queries, {len(pages_by_doc.get(doc_id, []))} pages; "
+                    f"{progress_timing(index, total_documents, started_at)}"
                 )
+            doc_hits = retrieve_pages(
+                doc_queries,
+                pages_by_doc.get(doc_id, []),
+                method,
+                top_k,
+                encoder,
+                require_dense_model=require_dense_model,
+                dense_batch_size=dense_batch_size,
+                dense_max_seq_length=dense_max_seq_length,
             )
+            hits.extend(doc_hits)
+            if method == "dense":
+                release_mps_cache()
         return hits
 
     docs = [page.page_text or page.ocr_text or page.page_id for page in pages]
@@ -456,14 +509,25 @@ def retrieve_hybrid_pages(
     if search_scope == SEARCH_SCOPE_DOCUMENT:
         pages_by_doc = group_pages_by_doc(pages)
         hits: list[RetrievalHit] = []
-        for doc_id, doc_queries in group_queries_by_doc(queries).items():
-            hits.extend(
-                retrieve_hybrid_pages(
-                    doc_queries,
-                    pages_by_doc.get(doc_id, []),
-                    {**retriever, "search_scope": SEARCH_SCOPE_CORPUS},
+        queries_by_doc = group_queries_by_doc(queries)
+        total_documents = len(queries_by_doc)
+        started_at = time.monotonic()
+        interval = progress_interval(total_documents)
+        for index, (doc_id, doc_queries) in enumerate(queries_by_doc.items(), start=1):
+            if index == 1 or index % interval == 0 or index == total_documents:
+                log_retrieval(
+                    f"Hybrid page retrieval: document {index}/{total_documents}; "
+                    f"{len(doc_queries)} queries, {len(pages_by_doc.get(doc_id, []))} pages; "
+                    f"{progress_timing(index, total_documents, started_at)}"
                 )
+            doc_hits = retrieve_hybrid_pages(
+                doc_queries,
+                pages_by_doc.get(doc_id, []),
+                {**retriever, "search_scope": SEARCH_SCOPE_CORPUS},
             )
+            hits.extend(doc_hits)
+            if "dense" in page_fusion_methods(retriever):
+                release_mps_cache()
         return hits
 
     encoder = str(retriever.get("encoder", "BAAI/bge-m3"))
@@ -1371,29 +1435,40 @@ def try_sentence_transformer_scores(
         scores = [[float(value) for value in row] for row in matrix]
         suffix = f":maxlen={max_seq_length}" if max_seq_length else ""
         return ScoreResult(scores, f"dense:sentence_transformers:{model_name}{suffix}")
-    except Exception:
+    except Exception as exc:
+        log_retrieval(f"Dense encoder is unavailable ({type(exc).__name__}: {exc}).")
+        if "out of memory" in str(exc).lower():
+            raise RuntimeError(
+                "Dense retrieval exhausted accelerator memory. Reduce `dense_batch_size` and "
+                "`dense_max_seq_length`, or run the experiment on a CUDA desktop."
+            ) from exc
         return None
 
 
 def get_sentence_transformer(model_name: str, max_seq_length: int | None = None) -> Any:
-    cache_key = f"{model_name}::max_seq_length={max_seq_length or 'default'}"
+    device = os.getenv("MDR_DENSE_DEVICE") or None
+    cache_key = f"{model_name}::max_seq_length={max_seq_length or 'default'}::device={device or 'auto'}"
     if cache_key in _SENTENCE_TRANSFORMER_CACHE:
         return _SENTENCE_TRANSFORMER_CACHE[cache_key]
 
     from sentence_transformers import SentenceTransformer
 
+    device_label = device or "automatic device selection"
+    log_retrieval(f"Loading sentence encoder `{model_name}` on {device_label} from local cache...")
+    started_at = time.monotonic()
     previous_hf_offline = os.environ.get("HF_HUB_OFFLINE")
     previous_transformers_offline = os.environ.get("TRANSFORMERS_OFFLINE")
     if os.getenv("MDR_ALLOW_MODEL_DOWNLOAD", "0") != "1":
         os.environ.setdefault("HF_HUB_OFFLINE", "1")
         os.environ.setdefault("TRANSFORMERS_OFFLINE", "1")
     try:
+        model_kwargs = {"device": device} if device else {}
         try:
-            model = SentenceTransformer(model_name, local_files_only=True)
+            model = SentenceTransformer(model_name, local_files_only=True, **model_kwargs)
         except Exception:
             if os.getenv("MDR_ALLOW_MODEL_DOWNLOAD", "0") != "1":
                 raise
-            model = SentenceTransformer(model_name)
+            model = SentenceTransformer(model_name, **model_kwargs)
     finally:
         if previous_hf_offline is None:
             os.environ.pop("HF_HUB_OFFLINE", None)
@@ -1408,6 +1483,7 @@ def get_sentence_transformer(model_name: str, max_seq_length: int | None = None)
         model.max_seq_length = max_seq_length
 
     _SENTENCE_TRANSFORMER_CACHE[cache_key] = model
+    log_retrieval(f"Sentence encoder is ready in {time.monotonic() - started_at:.1f}s.")
     return model
 
 

@@ -580,4 +580,3 @@ uv run mdr evaluate --run runs/retrieval/cn_page_region/latest
 ```text
 evidence cards -> LLM/VLM generation -> claim support -> citation validation -> refusal
 ```
-

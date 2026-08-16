@@ -62,6 +62,44 @@ Dense 相关实验必须保留 `HF_HOME=artifacts/hf_cache`。在 `run_info.json
 dense:sentence_transformers:BAAI/bge-small-zh-v1.5:maxlen=128
 ```
 
+## 2.1 MMDocIR 公开集外部验证
+
+官方评测数据保留在项目外部目录，不复制也不移动：
+
+```text
+/Users/zhouwenjing/Desktop/MMDocIR_Evaluation_Dataset
+```
+
+首次处理和页面级 BM25 基线：
+
+```bash
+MMDOCIR_EVALUATION_ROOT=/Users/zhouwenjing/Desktop/MMDocIR_Evaluation_Dataset \
+UV_CACHE_DIR=.uv-cache uv run mdr prepare --dataset mmdocir_evaluation
+
+UV_CACHE_DIR=.uv-cache uv run mdr retrieve \
+  --config configs/experiments/mmdocir_bm25_page.yaml
+UV_CACHE_DIR=.uv-cache uv run mdr evaluate \
+  --run runs/retrieval/mmdocir_bm25_page/latest
+```
+
+处理后的标准数据规模为 313 篇文档、20,395 页、170,338 个布局节点和 1,658 个问题。页面级金标覆盖全部问题；布局节点可精确映射的问题为 1,598/1,658，因此页面和布局指标必须分开报告。
+
+Dense 与 Hybrid 页面检索使用多语种模型 `BAAI/bge-m3`。模型下载成功后运行：
+
+```bash
+HF_HOME=artifacts/hf_cache UV_CACHE_DIR=.uv-cache \
+uv run mdr retrieve --config configs/experiments/mmdocir_dense_page_bge_m3.yaml
+HF_HOME=artifacts/hf_cache UV_CACHE_DIR=.uv-cache \
+uv run mdr evaluate --run runs/retrieval/mmdocir_dense_page_bge_m3/latest
+
+HF_HOME=artifacts/hf_cache UV_CACHE_DIR=.uv-cache \
+uv run mdr retrieve --config configs/experiments/mmdocir_hybrid_page_bge_m3.yaml
+HF_HOME=artifacts/hf_cache UV_CACHE_DIR=.uv-cache \
+uv run mdr evaluate --run runs/retrieval/mmdocir_hybrid_page_bge_m3/latest
+```
+
+当前已完成的 BM25 页面级结果：`Page Recall@1=0.4903`、`@5=0.7521`、`@10=0.8456`、`MRR=0.6084`、`nDCG@5=0.6060`。
+
 ## 3. 规则
 
 1. 在 `train` 和 `dev` 完成全部规则、权重、Top-K 与方法选择后，记录 Git commit 并冻结配置。

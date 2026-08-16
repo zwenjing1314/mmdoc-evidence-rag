@@ -257,7 +257,7 @@ def prepare_mmdocir(limit_docs: int | None = None) -> PrepareResult:
         len(pages),
         len(nodes),
         len(queries),
-        "MMDocIR generic preparation completed.",
+        "MMDocIR evaluation dataset prepared.",
     )
 
 
