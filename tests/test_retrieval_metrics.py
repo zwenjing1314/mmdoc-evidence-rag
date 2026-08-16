@@ -2,7 +2,14 @@ from __future__ import annotations
 
 import pytest
 
-from mmdocrag.evaluation.metrics import mrr, ndcg_at_k, page_recall_at_k, region_hit_at_k
+from mmdocrag.evaluation.metrics import (
+    mrr,
+    ndcg_at_k,
+    page_recall_at_k,
+    region_hit_at_k,
+    region_mrr,
+    region_ndcg_at_k,
+)
 from mmdocrag.retrieval.pipeline import (
     EvidenceCandidate,
     retrieve_evidence_set_region,
@@ -117,6 +124,8 @@ def test_metrics_page_and_region_hit():
     assert page_recall_at_k(queries, hits, 1) == 1.0
     assert region_hit_at_k(queries, hits, 1) == 1.0
     assert mrr(queries, hits) == 1.0
+    assert region_mrr(queries, hits) == 1.0
+    assert region_ndcg_at_k(queries, hits, 1) == 1.0
 
 
 def test_global_region_retrieves_nodes_directly():

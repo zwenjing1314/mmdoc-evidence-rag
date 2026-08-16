@@ -1,0 +1,11 @@
+experiment_name: mmdocir_layout_node_bge_m3
+dataset: mmdocir_evaluation
+retriever:
+  type: layout_node
+  search_scope: document
+  encoder: BAAI/bge-m3
+  require_model: true
+  dense_max_seq_length: 512
+  dense_batch_size: 2
+  top_k: [1, 5, 10]
+output_dir: runs/retrieval/mmdocir_layout_node_bge_m3

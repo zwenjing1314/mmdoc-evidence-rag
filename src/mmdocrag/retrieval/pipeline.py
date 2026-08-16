@@ -584,19 +584,30 @@ def retrieve_nodes(
     if search_scope == SEARCH_SCOPE_DOCUMENT:
         nodes_by_doc = group_nodes_by_doc(nodes)
         hits: list[RetrievalHit] = []
-        for doc_id, doc_queries in group_queries_by_doc(queries).items():
-            hits.extend(
-                retrieve_nodes(
-                    doc_queries,
-                    nodes_by_doc.get(doc_id, []),
-                    method,
-                    top_k,
-                    encoder,
-                    require_dense_model=require_dense_model,
-                    dense_batch_size=dense_batch_size,
-                    dense_max_seq_length=dense_max_seq_length,
+        queries_by_doc = group_queries_by_doc(queries)
+        total_documents = len(queries_by_doc)
+        started_at = time.monotonic()
+        interval = progress_interval(total_documents)
+        for index, (doc_id, doc_queries) in enumerate(queries_by_doc.items(), start=1):
+            if method == "dense" and (index == 1 or index % interval == 0 or index == total_documents):
+                log_retrieval(
+                    f"Dense layout-node retrieval: document {index}/{total_documents}; "
+                    f"{len(doc_queries)} queries, {len(nodes_by_doc.get(doc_id, []))} nodes; "
+                    f"{progress_timing(index, total_documents, started_at)}"
                 )
+            doc_hits = retrieve_nodes(
+                doc_queries,
+                nodes_by_doc.get(doc_id, []),
+                method,
+                top_k,
+                encoder,
+                require_dense_model=require_dense_model,
+                dense_batch_size=dense_batch_size,
+                dense_max_seq_length=dense_max_seq_length,
             )
+            hits.extend(doc_hits)
+            if method == "dense":
+                release_mps_cache()
         return hits
 
     docs = [node.text or node.node_id for node in nodes]
