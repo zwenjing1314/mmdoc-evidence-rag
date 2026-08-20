@@ -24,9 +24,23 @@ Hybrid 相比纯 Dense 在 Page R@5、Page R@10、MRR、nDCG 上均有提升；�
 | Dense-page | `mmdocir_dense_page_bge_m3.yaml` | `mmdocir_dense_page_bge_m3/20260816_110813` |
 | Hybrid-page | `mmdocir_hybrid_page_bge_m3.yaml` | `mmdocir_hybrid_page_bge_m3/20260816_112413` |
 
-## 下一步：布局节点基线
+## 布局节点结果
 
-运行 `configs/experiments/mmdocir_layout_node_bge_m3.yaml`，并使用同样的 `--no-sync` 和 CUDA 环境：
+布局节点实验使用全部节点类型，并只在存在精确布局映射的 1,598 个问题上计算区域级指标。
+
+| 方法 | Page R@1 | Page R@5 | Page R@10 | Region Hit@5 | Region MRR | Region nDCG@5 | Region nDCG@10 |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
+| Dense layout-node (BGE-M3) | 0.5109 | 0.7485 | 0.8317 | 0.5044 | 0.3719 | 0.3638 | 0.3948 |
+
+节点级 Dense 的 Page R@5 接近页面级方法，但 Region Hit@5 仅为 0.5044，说明页面命中并不等价于精确节点命中。常见原因包括同一页存在多个相邻布局节点、表格被拆分为多个节点，以及问题答案依赖图表或多个节点的组合。该结果支持后续 Evidence Set 方法需要做页面候选、节点定位和证据充分性联合建模，而不能只依赖单节点相似度。
+
+布局节点运行目录：`mmdocir_layout_node_bge_m3/20260816_115133`。
+
+## 下一步：问题类型分层与能力边界
+
+页面级和节点级公开集基线已经完成。下一步不立即引入视觉大模型，而是按问题类型统计结果：局部文本事实、多节点组合、全局统计/聚合、表格计算和视觉语义理解。主论文指标应先限定在局部证据和可定位布局证据问题上，并单独报告其余类型的覆盖率与失败原因。
+
+如果后续需要补跑布局节点实验，命令为：
 
 ```powershell
 $env:HF_HOME = "artifacts\hf_cache"
