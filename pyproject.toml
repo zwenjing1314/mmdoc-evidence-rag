@@ -37,6 +37,12 @@ dependencies = [
   "typer",
 ]
 
+[project.optional-dependencies]
+# Install on the CUDA evaluation machine before running the ColPali baseline.
+colpali = [
+  "colpali-engine>=0.3.0",
+]
+
 [dependency-groups]
 dev = [
   "ipykernel",

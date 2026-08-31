@@ -14,6 +14,7 @@ from typing import Any
 from mmdocrag.config import load_config
 from mmdocrag.io import read_processed_dataset, write_hits
 from mmdocrag.paths import data_root, resolve_project_path
+from mmdocrag.retrieval.colpali import retrieve_colpali_pages
 from mmdocrag.retrieval.scoring import SimpleBM25, SimpleTfidf, reciprocal_rank_fusion
 from mmdocrag.schemas import EvidenceNode, PageRecord, QueryRecord, RetrievalHit
 
@@ -65,6 +66,7 @@ def release_mps_cache() -> None:
             torch.mps.empty_cache()
     except (ImportError, AttributeError):
         return
+
 
 METRIC_ALIASES: dict[str, tuple[str, ...]] = {
     "营业收入": ("营业收入", "营收"),
@@ -182,6 +184,15 @@ def run_retrieval(config_path: Path, split_name: str | None = None) -> Path:
             dense_batch_size=dense_batch_size(retriever),
             dense_max_seq_length=dense_max_seq_length(retriever),
         )
+    elif retriever_type == "colpali_page":
+        hits = retrieve_colpali_pages(
+            dataset,
+            queries,
+            pages,
+            top_k=max_top_k(retriever),
+            config=retriever,
+            search_scope=search_scope,
+        )
     elif retriever_type == "hybrid_page":
         hits = retrieve_hybrid_pages(queries, pages, retriever)
     elif retriever_type == "layout_node":
@@ -251,7 +262,12 @@ def apply_data_split(
     queries: list[QueryRecord],
     split_override: str | None = None,
 ) -> tuple[
-    list[Any], list[PageRecord], list[EvidenceNode], list[QueryRecord], dict[str, Any] | None, Path | None
+    list[Any],
+    list[PageRecord],
+    list[EvidenceNode],
+    list[QueryRecord],
+    dict[str, Any] | None,
+    Path | None,
 ]:
     """Filter a processed dataset by the immutable document-level split manifest."""
     split_config = config.get("data_split")
@@ -300,7 +316,9 @@ def apply_data_split(
     if set(declared_doc_ids) != available_doc_ids:
         missing = sorted(available_doc_ids - set(declared_doc_ids))
         unknown = sorted(set(declared_doc_ids) - available_doc_ids)
-        raise ValueError(f"Split manifest does not match processed documents. Missing={missing}; unknown={unknown}.")
+        raise ValueError(
+            f"Split manifest does not match processed documents. Missing={missing}; unknown={unknown}."
+        )
 
     selected_doc_ids = set(split_docs[split_name])
     filtered_documents = [document for document in documents if document.doc_id in selected_doc_ids]
@@ -328,7 +346,14 @@ def apply_data_split(
         "node_count": len(filtered_nodes),
         "query_count": len(filtered_queries),
     }
-    return filtered_documents, filtered_pages, filtered_nodes, filtered_queries, split_info, manifest_path
+    return (
+        filtered_documents,
+        filtered_pages,
+        filtered_nodes,
+        filtered_queries,
+        split_info,
+        manifest_path,
+    )
 
 
 # 返回yaml文件中top_k中最大值
@@ -466,7 +491,9 @@ def retrieve_pages(
         started_at = time.monotonic()
         interval = progress_interval(total_documents)
         for index, (doc_id, doc_queries) in enumerate(queries_by_doc.items(), start=1):
-            if method == "dense" and (index == 1 or index % interval == 0 or index == total_documents):
+            if method == "dense" and (
+                index == 1 or index % interval == 0 or index == total_documents
+            ):
                 log_retrieval(
                     f"Dense page retrieval: document {index}/{total_documents}; "
                     f"{len(doc_queries)} queries, {len(pages_by_doc.get(doc_id, []))} pages; "
@@ -607,7 +634,9 @@ def retrieve_nodes(
         started_at = time.monotonic()
         interval = progress_interval(total_documents)
         for index, (doc_id, doc_queries) in enumerate(queries_by_doc.items(), start=1):
-            if method == "dense" and (index == 1 or index % interval == 0 or index == total_documents):
+            if method == "dense" and (
+                index == 1 or index % interval == 0 or index == total_documents
+            ):
                 log_retrieval(
                     f"Dense layout-node retrieval: document {index}/{total_documents}; "
                     f"{len(doc_queries)} queries, {len(nodes_by_doc.get(doc_id, []))} nodes; "
@@ -1476,7 +1505,9 @@ def try_sentence_transformer_scores(
 
 def get_sentence_transformer(model_name: str, max_seq_length: int | None = None) -> Any:
     device = os.getenv("MDR_DENSE_DEVICE") or None
-    cache_key = f"{model_name}::max_seq_length={max_seq_length or 'default'}::device={device or 'auto'}"
+    cache_key = (
+        f"{model_name}::max_seq_length={max_seq_length or 'default'}::device={device or 'auto'}"
+    )
     if cache_key in _SENTENCE_TRANSFORMER_CACHE:
         return _SENTENCE_TRANSFORMER_CACHE[cache_key]
 

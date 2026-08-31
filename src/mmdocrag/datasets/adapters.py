@@ -229,26 +229,122 @@ def prepare_mmdocir(limit_docs: int | None = None) -> PrepareResult:
         )
         return PrepareResult(dataset, processed_dir, 0, 0, 0, 0, "MMDocIR raw data not found.")
 
-    annotations = [json.loads(line) for line in annotations_path.read_text(encoding="utf-8").splitlines() if line]
+    annotations = [
+        json.loads(line)
+        for line in annotations_path.read_text(encoding="utf-8").splitlines()
+        if line
+    ]
     if limit_docs is not None:
         annotations = annotations[:limit_docs]
     doc_ids = {Path(item["doc_name"]).stem for item in annotations}
-    page_frame = pl.read_parquet(pages_path).with_columns(pl.col("doc_name").str.replace(r"\.pdf$", "").alias("doc_id"))
-    layout_frame = pl.read_parquet(layouts_path).with_columns(pl.col("doc_name").str.replace(r"\.pdf$", "").alias("doc_id"))
+    page_frame = pl.read_parquet(pages_path).with_columns(
+        pl.col("doc_name").str.replace(r"\.pdf$", "").alias("doc_id")
+    )
+    layout_frame = pl.read_parquet(layouts_path).with_columns(
+        pl.col("doc_name").str.replace(r"\.pdf$", "").alias("doc_id")
+    )
     page_rows = page_frame.filter(pl.col("doc_id").is_in(doc_ids)).to_dicts()
     layout_rows = layout_frame.filter(pl.col("doc_id").is_in(doc_ids)).to_dicts()
-    def page_id(doc_id: str, index: int) -> str: return f"{doc_id}_p{index}"
-    def bbox_key(bbox: list[float]) -> tuple[float, ...]: return tuple(round(float(value), 2) for value in bbox)
-    pages = [PageRecord(doc_id=row["doc_id"], page_id=page_id(row["doc_id"], int(row["passage_id"])), page_index=int(row["passage_id"]) + 1, page_text=str(row.get("ocr_text") or row.get("vlm_text") or ""), metadata={"domain": row.get("domain", "")}) for row in page_rows]
-    nodes = [EvidenceNode(node_id=f"{row['doc_id']}_p{row['page_id']}_l{row['layout_id']}", doc_id=row["doc_id"], page_id=page_id(row["doc_id"], int(row["page_id"])), node_type="table_block" if row["type"] == "table" else "figure" if row["type"] == "figure" else "paragraph", bbox=row["bbox"], text=str(row.get("text") or row.get("ocr_text") or row.get("vlm_text") or ""), source="mmdocir") for row in layout_rows]
-    lookup = {(node.doc_id, node.page_id, bbox_key(node.bbox or [])): node.node_id for node in nodes}
-    documents = [DocumentRecord(doc_id=doc_id, dataset=dataset, title=doc_id, domain=next((str(item.get("domain", "")) for item in annotations if Path(item["doc_name"]).stem == doc_id), ""), num_pages=sum(page.doc_id == doc_id for page in pages)) for doc_id in sorted(doc_ids)]
+
+    def page_id(doc_id: str, index: int) -> str:
+        return f"{doc_id}_p{index}"
+
+    def bbox_key(bbox: list[float]) -> tuple[float, ...]:
+        return tuple(round(float(value), 2) for value in bbox)
+
+    image_dir = data_root() / "interim" / dataset / "page_images"
+    pages = []
+    for row in page_rows:
+        relative_image_path = Path(str(row.get("image_path") or ""))
+        image_path = image_dir / relative_image_path.name
+        image_binary = row.get("image_binary")
+        if image_binary and not image_path.exists():
+            image_path.parent.mkdir(parents=True, exist_ok=True)
+            image_path.write_bytes(image_binary)
+        pages.append(
+            PageRecord(
+                doc_id=row["doc_id"],
+                page_id=page_id(row["doc_id"], int(row["passage_id"])),
+                page_index=int(row["passage_id"]) + 1,
+                page_text=str(row.get("ocr_text") or row.get("vlm_text") or ""),
+                page_image_path=str(image_path) if image_path.exists() else "",
+                metadata={
+                    "domain": row.get("domain", ""),
+                    "source_image_path": str(relative_image_path),
+                },
+            )
+        )
+    nodes = [
+        EvidenceNode(
+            node_id=f"{row['doc_id']}_p{row['page_id']}_l{row['layout_id']}",
+            doc_id=row["doc_id"],
+            page_id=page_id(row["doc_id"], int(row["page_id"])),
+            node_type="table_block"
+            if row["type"] == "table"
+            else "figure"
+            if row["type"] == "figure"
+            else "paragraph",
+            bbox=row["bbox"],
+            text=str(row.get("text") or row.get("ocr_text") or row.get("vlm_text") or ""),
+            source="mmdocir",
+        )
+        for row in layout_rows
+    ]
+    lookup = {
+        (node.doc_id, node.page_id, bbox_key(node.bbox or [])): node.node_id for node in nodes
+    }
+    documents = [
+        DocumentRecord(
+            doc_id=doc_id,
+            dataset=dataset,
+            title=doc_id,
+            domain=next(
+                (
+                    str(item.get("domain", ""))
+                    for item in annotations
+                    if Path(item["doc_name"]).stem == doc_id
+                ),
+                "",
+            ),
+            num_pages=sum(page.doc_id == doc_id for page in pages),
+        )
+        for doc_id in sorted(doc_ids)
+    ]
     queries = []
     for item in annotations:
         doc_id = Path(item["doc_name"]).stem
         for question in item["questions"]:
             mappings = question.get("layout_mapping", [])
-            queries.append(QueryRecord(query_id=f"mmdocir_{len(queries):05d}", dataset=dataset, doc_id=doc_id, question=question["Q"], answer=str(question.get("A", "")), question_type=str(question.get("type", "")), evidence_page_ids=[page_id(doc_id, int(value)) for value in question.get("page_id", [])], evidence_node_ids=[lookup[(doc_id, page_id(doc_id, int(mapping["page"])), bbox_key(mapping["bbox"]))] for mapping in mappings if (doc_id, page_id(doc_id, int(mapping["page"])), bbox_key(mapping["bbox"])) in lookup], metadata={"mmdocir_layout_count": len(mappings)}))
+            queries.append(
+                QueryRecord(
+                    query_id=f"mmdocir_{len(queries):05d}",
+                    dataset=dataset,
+                    doc_id=doc_id,
+                    question=question["Q"],
+                    answer=str(question.get("A", "")),
+                    question_type=str(question.get("type", "")),
+                    evidence_page_ids=[
+                        page_id(doc_id, int(value)) for value in question.get("page_id", [])
+                    ],
+                    evidence_node_ids=[
+                        lookup[
+                            (
+                                doc_id,
+                                page_id(doc_id, int(mapping["page"])),
+                                bbox_key(mapping["bbox"]),
+                            )
+                        ]
+                        for mapping in mappings
+                        if (
+                            doc_id,
+                            page_id(doc_id, int(mapping["page"])),
+                            bbox_key(mapping["bbox"]),
+                        )
+                        in lookup
+                    ],
+                    metadata={"mmdocir_layout_count": len(mappings)},
+                )
+            )
     write_processed_dataset(processed_dir, documents, pages, nodes, queries)
     return PrepareResult(
         dataset,
@@ -400,7 +496,9 @@ def build_cn_annotations(questions_per_doc: int = 8, limit_docs: int | None = No
         doc_id = pdf.stem  # 获取不带 .pdf 扩展名的文件名
         company = _company_name_from_doc_id(doc_id)  # 返回公司名称
         page_items = _extract_pdf_page_items(pdf)  # 获取所有页面的内容 坐标和文本
-        page_texts = [_clean_text(str(item.get("text") or "")) for item in page_items]  # 获取所有页面的文本
+        page_texts = [
+            _clean_text(str(item.get("text") or "")) for item in page_items
+        ]  # 获取所有页面的文本
         doc_rows, doc_skipped = _build_cn_doc_annotation_rows(
             doc_id=doc_id,
             company=company,
