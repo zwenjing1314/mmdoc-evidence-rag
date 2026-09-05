@@ -24,7 +24,7 @@ runs/
 *.npz
 *.pt
 *.ckpt
-*.pdf
+# *.pdf
 *.png
 *.jpg
 *.jpeg
