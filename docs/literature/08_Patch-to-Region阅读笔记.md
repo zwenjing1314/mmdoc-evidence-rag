@@ -1,5 +1,65 @@
 Spatially-Grounded Document Retrieval via Patch-to-Region Relevance Propagation
 
+# 疑问
+
+# 问一
+
+我自己总结一下Snappy这篇论文的核心方法，你来评价和纠正一下。 Snappy ：它处理的是推理部分，一般的处理过程是query与页面的所有patch计算相似度，再通过MazSim取最大值后求和，最后输出一个页面总得分数。原始的colpali会得到query和页面的patch的相似度矩阵，最后通过计算相似度得到top-k的检索页面。Snappy的做法是对这些检索到的候选页面先读取所有的OCR BBox，利用 query-token 与视觉 patch 的细粒度相似度图，按照覆盖比例IOU进行加权求和，为这个BBox的最终检索得分。所以Snappy核心的作用是在推理时定位到检索到top-k页面的页面内可能是证据的BBox吗？
+
+答：
+
+你的理解主线是对的。Snappy 的核心确实是：
+
+> 不改 ColPali、不训练新模型，而是在 ColPali 已召回的候选页面内，把 patch 级相关性映射到已有 OCR/Layout BBox，从而输出页面内的候选证据区域。
+
+不过有几处需要更严谨地修正。
+
+原始 ColPali 的页面分数可以写成：
+
+```
+Query token × page patch -> 相似度矩阵
+-> 每个 query token 在全页 patch 中取最大相似度
+-> 对所有 query token 求和
+-> Page Score
+```
+
+也就是 MaxSim 的 `max` 是沿“页面 patch”维度取的，最后才对 query token 聚合。它首先解决“哪一页相关”。
+
+Snappy 在此基础上保留 patch 级相似度信息。对已经召回的 Top-K 页面，它：
+
+```
+读取该页已有 OCR/Layout BBox
+-> 将每个 patch 与每个 BBox 做空间重叠映射
+-> 将与该 BBox 重叠的 patch relevance 按权重传播/聚合
+-> 得到每个 BBox 的 Region Score
+-> 输出 Top 区域及其坐标
+```
+
+所以你的最后一句可以改得更准确：
+
+> Snappy 的核心作用是在推理阶段，将 ColPali 的 patch 级相关性投影到已有 OCR/Layout BBox，进而在 Top-K 候选页面内定位和排序可能包含证据的区域。
+
+两个小纠正：
+
+1. `MaxSim` 拼写如此，不是 `MazSim`。
+2. “覆盖比例”和“标准 IoU”不要混为一谈。  
+   - 标准 IoU：`交集面积 / 并集面积`
+   - patch coverage：`交集面积 / patch 面积`
+   - region coverage：`交集面积 / BBox 面积`
+
+它们都会作为软空间权重，但数值特性不同。尤其当 BBox 很大、patch 很小时，标准 IoU 会非常小；实现 Snappy 基线时必须回到原论文或官方代码确认其确切权重定义，不能仅凭名称默认是标准 IoU。
+
+Snappy 与 RegionRAG 的核心区别也可记成一句：
+
+```
+Snappy：已有 BBox + 冻结 ColPali patch 分数 -> 区域定位
+RegionRAG：训练 patch 局部对齐能力 + 动态生成 BBox -> 区域定位
+```
+
+因此 Snappy 对你最直接的价值，是作为“无需训练的区域定位基线”。如果未来你的 OCR/Layout 融合模块无法明显超过它，就不能证明复杂模块是必要的。
+
+
+
 # 1. 它发现了 ColPali 的什么问题
 
 *Patch-to-Region* 这篇论文的出现，可以说是极其精准地狙击了 ColPali 在实际应用（尤其是细粒度文档理解）中的最大软肋。它发现 ColPali 存在一个根本性的矛盾：**底层的物理网格（Patch Grid）与高层的语义区域（Semantic Region）之间存在严重的割裂。**

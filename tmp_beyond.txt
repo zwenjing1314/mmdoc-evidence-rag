@@ -1,0 +1,1124 @@
+Beyond Bag-of-Patches: Learning Global Layout via Textual Supervision
+for Late-Interaction Visual Document Retrieval
+Pascal Tilli*
+University of Stuttgart,
+Stuttgart, Germany
+pascal.tilli@ims.uni-stuttgart.de
+Mohsen Mesgar
+Bosch Center for Artificial Intelligence,
+Renningen, Germany
+mohsen.mesgar@bosch.com
+Abstract
+Visual Document Retrieval (VDR) models
+mostly rely on late interaction architectures, in
+which documents are represented by a set of lo-
+cal patch embeddings and then matched against
+query tokens. While efficient, this architecture
+prioritizes local similarity over global layout
+structure of documents to estimate relevancy
+between documents and query. In practice, this
+leads to errors as relevance originates from lay-
+out structure of documents with heterogeneous
+layouts combining figures, tables, and text. We
+make document layout learnable without chang-
+ing inference. We propose a multimodal en-
+coder that augments local patch representations
+with a global layout embedding, trained via
+textual descriptions encoding document layout
+information. Across four ViDoRe-v2 datasets,
+our model improves over the strongest archi-
+tecturally comparable ColPali/ColQwen base-
+line by +2.4 nDCG@5 and +2.3 MAP@5, with
+statistically significant per-dataset gains over
+ColQwen.
+1 Introduction
+Document retrieval is a core component of retrieval-
+augmented generation (RAG), where retrieval qual-
+ity directly determines factual grounding (Lewis
+et al., 2020; Mei et al., 2025; Wu et al., 2025). Doc-
+uments in practical domains exhibit heterogeneous
+layouts combining text, tables, and figures (Dong
+et al., 2025; Peng et al., 2025). This incentivize
+models to integrate semantically and visually di-
+verse features. However, recent embedding models
+fail to capture document-level semantics in visu-
+ally structured pages since they are primarily opti-
+mized for text-dominant corpora (Mei et al., 2025;
+Abootorabi et al., 2025).
+A promising solution isvisual document re-
+trieval (VDR)models, which treat document pages
+*
+Work done during an internship at the Bosch Center for
+Artificial Intelligence.
+Query:  How does the economic situation in East Asia and the Pacific affect global trade?
+The page presents an analyticaleconomic report focused onrisks facing the East Asia andPacific (EAP) region [...] The leftcolumn contains denseparagraphs discussing traderestrictions, [...] while the rightcolumn features a titled figure(“EAP: Risks”) summarizing keypoints visually. The Charts showcomparative data and trends,such as [...] illustrating economicshifts over time. Overall, it’s astructured, data-drivenpresentation [...] combiningnarrative Analysis with visualizedstatistics.
+This image shows a table ofcontents [...] The layout is cleanand structured, with sectionheadings, chapter titles, andsubtopics arranged hierarchicallyand accompanied by pagenumbers. The document isdivided into major parts,beginning with introductorysections like acknowledgments,[...] followed by detailed chapterbreakdowns. [...] The visual styleemphasizes clarity, withheadings in bold or colored textto distinguish them fromsubtopics.
+Figure 1: Example of a layout-intensive query. The
+relevant page (left) combines narrative evidence with
+a chart region, requiring cross-region reasoning over
+text, figures, and layout. The distractor page (right)
+contains superficial lexical overlap but is globally irrele-
+vant because it is a table of contents. Textual structural
+descriptors summarize page-level organization during
+training, helping the model learn global layout signals
+that patch-only MaxSim scoring tends to miss.
+as images to avoid expensive OCR (Faysse et al.,
+2025; Xu et al., 2025; Team, 2025; Günther et al.,
+2025). These VDR models often adoptlate in-
+teraction(a.k.aMaxSim), representing each page
+as a set of patch embeddings and computing rele-
+vance via a sum of maximum similarities between
+query tokens and page patch tokens (Khattab and
+Zaharia, 2020). While being effective for captur-
+ing fine-grained local evidences such as table cells,
+figure regions, or typographic cues, theirMaxSim
+formulation ignores spatial relationships between
+matched regions and biases retrieval toward iso-
+lated local matches.
+In practical domains, relevance in visually rich
+documents depends also onpage-level structure,
+i.e., how textual and visual elements interact across
+the page. As illustrated in Figure 1, answering
+the query requires linking narrative text about eco-
+nomic risks with corresponding figures, rather than
+matching either in isolation. This exposes a fun-
+damental challenge as pages may contain locally
+relevant elements while remaining globally irrel-
+1
+arXiv:2605.08421v1  [cs.CV]  8 May 2026
+evant. As a result, global layout signals, which
+may be partially encoded by vision encoders, re-
+main weakly expressed in the retrieval space after
+late-interaction scoring. We argue that this is a
+structural limitation of patch-based retrieval and
+empirically show that global relevance cannot be
+recovered from local similarity alone.
+We propose a late-interaction encoder that in-
+troduces a structural bottleneck via a [CLS]-style
+global token. This token is explicitly optimized
+to capture global information about the page and
+enables local patches be contextualized by page-
+level layout. Rather than relying on pooling or
+inference-time augmentation, we train global struc-
+ture directly within the retrieval space. The core
+idea lies indescriptor-guided structural supervi-
+sion. We train the global token using textual de-
+scriptors of document layout, instead of standard
+image–caption objectives. These automatically-
+generated descriptors summarize page-level orga-
+nization and are used only during training, encour-
+aging the model to encode structural relationships
+alongside local visual evidence. It enables retrieval
+in layout-intensive domains where relevance de-
+pends on cross-region interactions. At inference,
+descriptors are discarded since the model indexes
+only the page images plus one learned global vec-
+tor, preserving the standard visual retrieval pipeline
+with negligible overhead.
+We experiment on the four datasets of Visual
+Document Retrieval Benchmark V2 (ViDoRe-v2).
+We compare our model withColPali/ColQwen and
+larger models such as Nemo-3b. To study the ef-
+fect of descriptor-guided supervision, we intro-
+duce two Cross-Context methods as baselines.
+These methods inject textual descriptors at infer-
+ence and act as an oracle for explicit access to
+global structure information. Our model improves
+over ColPali/ColQwen by+2.4 nDCG@5and
++2.3 MAP@5, with gains concentrated on layout-
+intensive pages. Our model also performs on par
+with or surpasses the Cross-Context oracle with-
+out requiring descriptors at inference. This indi-
+cates that our method can capture global structural
+signals not merely as exploitable features, but as
+parameterized retrieval prior.
+Contributions.Our key contributions are(1)We
+identify a limitation of late-interaction retrieval
+for visual documents, where the MaxSim lacks
+a mechanism to model page-level structure;(2)
+We show that late-interaction retrieval fails to rep-
+resent cross-region structure; so we introduce a
+learnable global bottleneck to encode it,(3)We
+show that this training-only structural signal im-
+proves retrieval without requiring descriptors at
+inference, yielding consistent gains over compa-
+rable ColPali/ColQwen baselines, especially on
+layout-rich pages.
+2 Method
+The late-interaction retrieval lacks a mechanism
+to encode global layout, which is a key signal for
+robust retrieval from visually-rich documents. This
+structural limitation is because patch embeddings
+are optimized independently and matched locally.
+We address this by introducing a global structural
+bottleneck. This bottleneck enables page-level con-
+text to influence retrieval. This context includes
+layout, spatial organization, and distributed visual
+patterns that cannot be reliably captured by in-
+dependent patch embeddings nor by their simple
+mathematical aggregations (e.g., the mean pooling)
+as we show in our experiments.
+Figure 2 shows an overview of our method. We
+introduce a multi-vector visual encoder augmented
+with a trainable global token and descriptor-guided
+structural supervision. The global token acts as a
+dedicated aggregation variable using self-attention.
+By attending to all patches simultaneously, the
+global token encodes the relative spatial relation-
+ships, such as the proximity of a caption to a chart.
+These relationships are otherwise lost in indepen-
+dent local patch matching. This consolidates page-
+level layout information into a singular represen-
+tation rather than leaving it implicitly distributed
+across patches.
+2.1 Training
+Multi-V ector Encoder with Trainable Global
+Token.We build on a Vision Large Language
+Model (VLLM) that projects a document page into
+a sequence of patch embeddingsI∈R Lp×d. While
+the transformer backbone allows for inter-patch at-
+tention during encoding, the late-interaction simi-
+larity function matched at retrieval time operates
+on patches independently, effectively treating the
+page as a “bag-of-patches.” To preserve and ag-
+gregate global page-level semantics, we append a
+trainable gv ∈R d token to the visual sequence
+I′ = [I;g v]∈R (Lp+1)×d, which is randomly ini-
+tialized. By passing I′ through the self-attention
+layers of the language model,gv acts as a structural
+2
+VLLM
+VLLM
+LoRA
+LLM
+LoRA
+LLM
+Vision Encoder
+LoRA
+Vision Encoder
+LoRA
+LLM
+Max Sim
+LLM
+LLM
+Query
+Global Descr
+Query
+GlobalToken
+GlobalToken
+GlobalToken
+Image
+GlobalToken
+Image
+Training
+Inference
+Figure 2: A high-level view of our descriptor-guided global modeling approach.Top (Training):We append a
+trainable global token to the vision-encoder patch embeddings and contextualize it jointly with local features in the
+VLLM. Training optimizes three objectives: (1) a late-interaction max-similarity loss between query and document
+patches, (2) a late-interaction max-similarity loss between textual global descriptors and document patches, and
+(3) a global-token InfoNCE alignment loss using cosine similarity logits aligning the image-derived global token
+with the descriptor-derived global representation.Bottom (Inference):Only image and query inputs are used. The
+global token is appended to both sequences and contextualized without requiring textual descriptors. Document
+relevance is scored using late-interaction similarity.
+bottleneck. It is trained to aggregate cross-region
+relationships that would otherwise be lost during
+the independent MaxSim matching phase. As a
+result, global layout information is explicitly repre-
+sented in the multi-vector index and can influence
+retrieval alongside local patch embeddings.
+Textual Structural Descriptors as Layout Su-
+pervision.To train the global token g to repre-
+sent layout priors, we supervise it using textual
+structural descriptors. These descriptors (Figure 1)
+summarize a page’s spatial organization (e.g., the
+positioning of columns, tables, and headers) while
+omitting fine-grained textual content. By abstract-
+ing away local details, we force the global token to
+encode global page layout rather than a redundant
+representation of local patches. These descriptors
+are used only as an auxiliary signal during training.
+At inference, the model operates as a purely visual
+retriever. Further details about generation of these
+descriptors are in Appendix 7.2.
+Aligning Global Token to Textual Descriptions.
+We enforce structural consistency at the page level
+by aligning the visual global token with the descrip-
+tor’s textual representation. The textual descriptor
+is passed through the same Large Language Model
+(LLM) backbone of the VLLM. It ensures that the
+text encoder and vision-language encoder share the
+same semantic vocabulary and places both visual
+and textual tokens in a shared embedding space.
+The embedding layer of the LLM encodes the tex-
+tual descriptor into a sequence Edesc ∈R LT ×d,
+where LT is the number of textual tokens in desc.
+We randomly initialized a global token embeddings
+g∈R d and append it to Edesc. After processing
+through the self-attention layers, this token’s output
+hidden state serves as the textual structural token
+gdesc ∈R d.
+We apply the InfoNCE objective, which is a con-
+trastive loss, averaged over the batch, to align g
+withg desc:
+Lglobal =− 1
+B
+BX
+i=1
+
+sii −log
+BX
+j=1
+exp(sij)
+
+ ,
+(1)
+where sij = cos(gi
+v,gj
+desc)
+τ , gi
+v and gi
+desc denote
+the visual and textual global token of thei-th sam-
+3
+ple in the batch, respectively. τ is a temperature
+hyper-parameter and B is the batch size. By us-
+ing in-batch negatives, the global token learns the
+unique layout semantics of a page relative to other
+pages. Unlike standard image-caption matching,
+this loss trains the visual global token to serve as a
+latent proxy for the high-level layout priors, effec-
+tively distilling the descriptor’s structural semantics
+into the visual embedding space.
+Aligning Textual Descriptors with Local Patch
+Embeddings.To complement the global token’s
+macro-level awareness, we enforce fine-grained
+structural alignment at the patch level. We optimize
+local patch embeddings I∈R Lp×d to align with
+the textual descriptor embeddings Edesc ∈R Lg×d:
+Llocal =−
+LpX
+k=1
+max
+1≤j≤Lg
+cos(ik,e j),(2)
+which encourages each patch to match the most
+relevant structural descriptor token. By ground-
+ing local patches in the structural context provided
+by the descriptor, we ensure the model maintains
+structural coherence even when queried at a granu-
+lar level.
+Joint Objective for Global and Local Structured
+Retrieval.We combine our structural alignment
+objectives with the standard multi-vector retrieval
+loss Lretrieval, which aligns patch embeddings I
+directly with query embeddings Q via late interac-
+tion. Thus, the final joint objective is:
+L=L global +L local +L retrieval (3)
+This objective couples global structure with local
+evidence, enabling both to influence the learned
+representation space. To maintain computational
+efficiency, we restrict updates to LoRA adapters
+within the VLLM transformer layers, keeping the
+base vision encoder and LLM weights frozen. By
+coupling local evidence with global structure, the
+model learns a multi-granularity representation
+space where both levels contribute to the final re-
+trieval score. The auxiliary objectives introduce
+negligible overhead, as they operate on existing
+hidden states via cosine similarity.
+2.2 Inference and Scoring
+At inference, our model operates as a purely vi-
+sual retriever and does not require any textual de-
+scriptors. This makes the method computation-
+ally viable for large-scale RAG settings where real-
+time descriptor generation would be prohibitively
+expensive. Both queries and documents are en-
+coded as multi-vector representations augmented
+with global tokens: Q∈R (Lq+1)×d and D∈
+R(Ld+1)×d. We compute the retrieval score using
+the late-interaction function:
+s(Q,D) =
+Lq+1X
+i=1
+max
+1≤j≤Ld+1
+QiD⊤
+j ,(4)
+where Q and D are the query and document em-
+bedding sequences (including global tokens).
+Including the global tokens in the MaxSim op-
+eration allows the model to consider both local
+matches and global structure. Local patch simi-
+larities capture fine-grained evidence. The global
+token captures coarse layout structure. Together,
+they influence the final similarity score. This mech-
+anism allows structural priors learned from tex-
+tual supervision to directly influence the similarity
+score. It does so without increasing computational
+complexity beyond the addition of a single vector
+per document.
+3 Experiments
+3.1 Datasets
+We evaluate Gbl-Desc-FT (Section 2) on ViDoRe-
+v2 (Macé et al., 2025), the current standard for
+assessing visual retrieval models under realistic
+document layouts. Table 1 summarizes the dataset
+statistics. We evaluate on four diverse domains:
+economic reports, biomedical materials, and ESG
+industry disclosures (ESGH and ESGR). These
+datasets exhibit heterogeneous structures, including
+multi-column text, embedded charts, and complex
+tabular data.
+For fine-tuning, we use the training set of
+ColPali (Faysse et al., 2025), consisting of 118k
+training and 500 development samples. Each in-
+stance pairs an English text query with a relevant
+document page. We augment each instance with a
+textual structural descriptor, as a one-time offline
+preprocessing step, (Appendix 7.2) to provide su-
+pervision for global layout. This setup enables con-
+Dataset Docs Queries Pages Pages / Query
+Economics 5 232 452 15.6
+Biomedical 27 640 1,016 3.2
+ESGH 27 52 1,538 2.5
+ESGR 30 228 1,538 3.9
+Table 1: The dataset statistics of ViDoRe-v2.
+4
+trolled evaluation of retrieval under diverse layout
+conditions.
+3.2 Evaluation Metrics
+We report Normalized Discounted Cumulative
+Gain (nDCG) and Mean Average Precision ( MAP).
+nDCG@k measures ranking quality by penalizing rel-
+evant documents that appear lower in the results
+list. This is critical for RAG, where top-ranked
+pages dominate generation quality. MAP@k mea-
+sures retrieval consistency by averaging precision
+across all relevant pages for a given query. It cap-
+tures a model’s ability to retrieve all relevant pages
+even in use cases with long-tail queries. For all
+experiments, we report metrics at k= 5 , follow-
+ing the default setting established by the ViDoRe
+benchmark.
+3.3 Methods Compared
+To study the impact of structural supervision, we
+compare Gbl-Desc-FT with two architectural vari-
+ants and state-of-the-art visual retrievers.
+Cross-Context-Frozen ( CrossContext-ZS).
+We construct a training-free variant that concate-
+nates local visual patches with pre-generated
+textual descriptors at inference time. Visual and
+textual embeddings are concatenated and passed
+through the VLLM, allowing joint attention over
+local details and page layout semantics (Figure 3).
+This training-free variant serves as an oracle
+baseline as it uses the generated textual descriptors
+during the retrieval phase. While computationally
+expensive, it provides an insight on to what
+extend textual descriptor could be informative for
+retrieval.
+Cross-Context-FineTuned ( CrossContext-FT).
+To examine whether global structure can be
+encoded by the model parameters when tex-
+tual structural descriptors are available, we
+fine-tune the cross-context variant on the
+same vidore/colpali_train_set used for
+Gbl-Desc-FT training. Each training instance
+consists of a query, its relevant document page,
+and the offline-generated textual structural
+descriptor for that page. The descriptor tokens
+are concatenated with the visual patch tokens
+and passed through the VLLM, enabling joint
+contextualization of local visual evidence and
+page-level descriptor information. We update
+only Low-Rank Adapters (LoRA) parameters,
+keeping all base model weights frozen. The model
+Max Sim
+LLM
+VLLM
+Query
+GblDesc
+Image
+LLM
+Vision Encoder
+Em-beddingLayer
+Cross-Contextualization
+Em-beddingLayer
+Figure 3: The cross-context baseline for frozen and
+fine-tuned variants. Patch-level image embeddings are
+concatenated with embeddings of tokens of the textual
+global descriptor.
+is optimized with the standard late-interaction
+retrieval objective over query–document pairs
+using in-batch negatives, and early stopping is
+performed on the development split.
+State-of-the-art (SOTA) Methods.We com-
+pare our method with leading open-source
+VDR systems on ViDoRe-v2. Our primary
+baseline is ColQwen2.5 (Faysse et al., 2025),
+which shares the same architecture and pre-
+training as our model. We additionally include
+llama-nemoretriever-colembed (Xu et al.,
+2025), colnomic-embed-multimodal (Team,
+2025), and ColPali (Faysse et al., 2025) to
+provide a comprehensive view of the current
+state of visual retrieval. These models differ in
+pretraining objectives and data, and are evaluated
+without additional fine-tuning for comparability.
+3.4 Implementation Details
+The vision and text encoders are initialized
+from ColQwen2.5 pretrained LoRA adapters and
+weights. The global token embedding is initial-
+ized randomly and added to the model’s vocabulary.
+Base encoder weights remain frozen; only LoRA
+parameters and the retrieval projection head are
+updated. We fine-tune Gbl-Desc-FT for 6 epochs
+with a batch size of 128 using AdamW with a learn-
+ing rate of 5×10 −5, weight decay 10−4, and a
+linear warm-up over the first 100 steps. The full
+implementation details are in Appendix 7.3.
+4 Results
+Main Findings.Overall, our evaluation reveals
+four primary trends that characterize the impact
+of global structural descriptors on retrieval per-
+formance:(1) Gbl-Desc-FT consistently outper-
+forms all architecturally comparable baselines.
+We observe a +2.4 point improvement in aver-
+age nDCG@5 and a +2.3 point gain in average
+MAP@5 over our primary baseline, ColQwen2.5.
+5
+Economics Biomedical ESGH ESGR A vg
+Method SizenDCG MAP nDCG MAP nDCG MAP nDCG MAP nDCG MAP
+Architecturally and size comparable
+ColPali(Faysse et al., 2025) 2B 47.5 17.7 55.2 46.1 52.2 46.1 48.5 36.1 50.9 36.5
+Colnomic-3b(Team, 2025) 3B 54.3 22.562.6 53.264.3 57.9 56.4 43.5 59.4 44.3
+ColQwen2.5-T3B 53.0 21.0 58.4 49.2 62.0 54.8 51.9 39.6 56.3 41.2
+ColQwen2.5(Faysse et al., 2025) 3B 55.9 23.4 61.2 52.1 68.1 60.4 55.9 43.8 60.3 45.0
+Gbl-Desc-FT (ours) 3B58.2 † 25.2† 61.7† 52.4† 73.4† 67.1† 57.3† 44.6† 62.7 47.3
+Architecturally different OR significantly larger
+Colnomic-7b(Team, 2025) 7B 55.5 23.7 62.9 54.3 69.8 62.4 54.1 43.1 60.6 45.9
+Nemo-3b(Xu et al., 2025) 4.4B 57.8 24.4 62.7 53.9 75.4 68.3 57.6 45.5 63.5 48.0
+Table 2: We report performance on ViDoRe-v2 using nDCG@5, MAP@5, and their means. The first block contains
+architecturally comparable multi-vector retrievers with similar parameter scale (2–3B), representing our primary
+baselines. Gbl-Desc-FT improves consistently over the strongest 3B ColPali-family baseline (ColQwen2.5). The
+second block includes larger or architecturally different models (4–7B) trained with different objectives and is shown
+only for reference. ESGH and ESGR are the human-labeled and Restaurant version of ESG dataset. ColQwen2.5-T
+is ColQwen2.5 where supplied with OCR-based textual representations of documents. Results marked with † are
+statistically significant (Wilcoxon Signed-Rank test,p <0.05) compared to theColQwen2.5.
+(2)These gains concentrate on layout-rich datasets
+(e.g., ESGH), demonstrating the importance of
+page-level layout signals.(3)Ablations reveal that
+global and local cues are individually insufficient
+and so their synergy drives the gains.(4)Improve-
+ments scale with spatial heterogeneity and multi-
+region reasoning demands. Together, these findings
+show that our descriptor-guided global alignment
+idea yields a structural inductive bias for visual
+document retrieval and cannot be recovered from
+patch-level similarity alone.
+4.1 Document Retrieval
+Table 2 reports retrieval effectiveness across the
+four ViDoRe-v2 datasets.
+Gbl-Desc-FT achieves the strongest average per-
+formance among all ColPali- and ColQwen-based
+systems, which are closest counterparts in terms
+of architecture and training setup. It gains +2.4
+nDCG@5 and +2.3 MAP@5 points compared with
+ColQwen2.5, showing that the proposed global lay-
+out modeling encodes a complementary structural
+prior not captured by patch-level similarity.
+When comparing with large multimodal retriev-
+ers such as Nemo-3b (4.4B) and ColNomic-7B; our
+3B-parameter model delivers competitive average
+performance, and in some cases exceeds ColNomic-
+7B, in particular on layout-heavy datasets ESGH
+and ESGR. This suggests improved parameter ef-
+ficiency as our 3B model outperforms a 7B model
+by leveraging structural inductive biases. Crucially,
+the underperformance of ColQwen2.5-T suggests
+that raw text without spatial context provides lim-
+ited benefit. Together, these findings show that
+a compact model with explicit structural bias can
+match and even sometimes surpass the performance
+of substantially larger encoders on visually hetero-
+geneous documents.
+4.2 Ablation Study
+Table 3 contrasts the contribution of global and
+local patch embeddings as well as alternative pool-
+ing strategies for aggregating local patch embed-
+dings to obtain global embeddings. while we report
+per-dataset scores for completeness, we focus our
+analysis on the mean (Avg) scores, which are more
+reliable than dataset-specific fluctuations.
+Removing local patch embeddings leads to per-
+formance degradation on average ( nDCG: −27.5,
+MAP: −24.9). In this configuration, the model re-
+lies solely on the global token embeddings, which
+encode page-level layout. Indeed, this model lacks
+the local content granularity that is essential to pre-
+cisely match localized elements such as individual
+words, numbers, or icons. This confirms that global
+structure embeddings contributes to the retrieval
+performance and local patches are still the primary
+evidence for fine-grained matching. Ablating the
+global tokens leads to small but consistent declines
+(nDCG: −0.3, MAP: −0.4). The small magnitude of
+this drop suggests that the fine-tuned local patches
+have partially learned to capture the structural sig-
+nals of document. The explicit token still provides
+the optimal anchor. It adds information that im-
+proves performance on layout-heavy pages. Ab-
+lating either the query- or image-side global token
+yields similar drops (nDCG≤ −0.4). This symmetry
+suggests that the benefit of global structure comes
+6
+Economics Biomedical ESGH ESGR A vg
+MethodnDCG MAP nDCG MAP nDCG MAP nDCG MAP nDCG MAP
+Gbl-Desc-FT58.2 25.2 61.7 52.4 73.4 67.1 57.3 44.6 62.7 47.3
+w/o local patch embeddings 49.2 18.0 43.8 35.8 28.1 22.8 19.5 12.9 35.2 22.4
+w/o query global token 58.1 24.9 62.2 52.9 71.6 65.0 57.7 45.3 62.4 46.9
+w/o image global token 58.4 25.1 61.9 52.6 72.5 66.2 57.4 44.9 62.6 47.2
+Fine-tuned w/oL global 55.0 23.5 60.2 51.4 69.7 62.2 57.0 45.1 60.5 45.6
+Fine-tuned w/oL local 57.8 24.9 60.9 52.0 71.0 64.1 57.5 45.1 61.8 46.5
+Mean-Pooling 38.7 28.7 17.1 17.6 25.5 14.0 22.6 13.1 11.7 15.3
+Max-Pooling 16.3 13.6 6.6 10.2 11.7 4.0 9.9 4.6 7.7 6.5
+Median-Pooling 38.5 26.1 16.9 16.7 24.6 13.9 20.5 12.5 10.9 14.4
+Table 3: Ablation study on ViDoRe-v2. The Mean, Max, and Median poolings are deterministic ways to induce
+global representations from local patch embeddings.
+MethodnDCG MAP
+CrossContext-ZS61.7 46.4
+CrossContext-FT62.5 47.1
+Gbl-Desc-FT62.7 47.3
+Table 4: Comparing Gbl-Desc-FT with
+CrossContext-ZS and CrossContext-FT using
+mean nDCG and MAP scores on ViDoRe-v2.
+from aligning query intent with document layout,
+not from either side alone. The largest gains are
+when both are present, enabling joint reasoning
+over query intent and document structure.
+Effects of the Loss FunctionsRemoving the
+global-token alignment loss (w/o Lglobal) drops the
+performance (nDCG: −2.2, MAP: −1.7). This shows
+that explicit supervision for training the global rep-
+resentation is the larger contributor in this ablation.
+Dropping the local-descriptor alignment loss (w/o
+Llocal) also lowers performance (nDCG: −0.9, MAP:
+−0.8), indicating that patch-level structural ground-
+ing is essential for retrieval as well.
+Pooling is an Inadequate Substitute.In the
+Mean, Max, and Median pooling variants of
+Gbl-Desc-FT, we use these aggregation functions
+to obtain global token representations from local
+patch embeddings. We observe a substantial perfor-
+mance drop, confirming that naively collapsing lo-
+cal patch information into a single global vector re-
+moves crucial structure signals and cannot replace
+trained global representations byGbl-Desc-FT.
+4.3 Impact of Global Descriptors
+Table 4 compares Gbl-Desc-FT to its two
+Cross-Context counterparts ( CrossContext-ZS
+and CrossContext-FT). These models require tex-
+tual global descriptors at inference. Despite not
+Feature Failures Improvements
+Text 11.56 14.14
+Image 2.91 3.31
+List 1.47 2.80
+NWords 289.27 380.53
+NVE 2.24 3.24
+Table 5: Summary of the mean of certain document
+page features of failure cases and improvements of our
+method compared to its baseline ColQwen2.5 on the
+ESGH dataset
+using descriptors at inference, our Gbl-Desc-FT
+outperforms CrossContext-ZS and performs on
+par with CrossContext-FT, indicating that page
+layout information extraction is learned via encoder
+parameters.
+4.4 Case Study: Layout Complexity in ESGH
+We use ESGH as a focused case study because it
+contains the most structurally complex layouts in
+ViDoRe-v2, including dense text regions, visual el-
+ements, lists, and spatially dispersed content, as il-
+lustrated in Figure 4 and summarized in Section 4.4.
+As shown in Figure 4, simple pages with con-
+tiguous text boxes offer limited visual or spatial
+variation, whereas complex layouts combine im-
+ages, multiple text regions, and large tables, requir-
+ing integration of visual semantics, textual cues,
+and layout relationships. Section 4.4 shows that
+improvement cases consistently have more text re-
+gions, visual elements, lists, and higher content
+density than failure cases, reflecting the same com-
+plexity signals—high spatial entropy and element
+diversity—linked to larger gains in earlier analysis.
+These patterns align with our quantitative find-
+ings: Gbl-Desc-FT excels when spatial-semantic
+7
+Layout Complexity ComparisonDocument with a simple layout, containing 7 text boxes.Document with a more complex layout, containing:
+1 image2 text boxes1 large table
+Figure 4: Examples of ESGH page layouts: a simple,
+text-only page (top) and a complex, multi-region layout
+with mixed modalities (bottom).
+reasoning across heterogeneous, multi-region lay-
+outs is needed, but offers smaller gains on simpler,
+text-only pages where local matching suffices. This
+case study thus confirms that descriptor-guided
+global modeling delivers its strongest benefits in
+visually rich, structurally complex documents.
+5 Related Work
+Recent visual document retrieval methods can be
+grouped into two broad categories, OCR-based re-
+trieval and visual document retrieval.
+OCR-based RetrievalRecent OCR-based meth-
+ods (Wang et al., 2024; Wei et al., 2025, 2024; Niu
+et al., 2025) typically follow two stages. First they
+convert pages into textual and structural tokens,
+such as words, lines, tables, and detected layout
+regions, using an OCR engine. Retrieval is then
+performed in the text space with methods such as
+dense text encoders (Reimers and Gurevych, 2019),
+BM25 (Robertson et al., 1994), and layout-aware
+models (Xu et al., 2020, 2021; Huang et al., 2022).
+While effective, these pipelines inherit OCR errors
+such as incorrect reading order, misaligned bound-
+ing boxes, missing captions, or failure to parse
+figures and charts. As a result, their performance
+degrades on visually rich pages, where crucial se-
+mantic cues are encoded in the raw layout, not in
+transcribed text. In contrast, our approach operates
+directly on the visual document image and learns
+a global structural representation that does not de-
+pend on OCR or textual content.
+Visual Document RetrievalVisual document re-
+trieval bypasses OCR by embedding an entire doc-
+ument page as an image and learning similarity di-
+rectly in a multimodal space. Early vision-language
+document models such as LayoutLM (Xu et al.,
+2020; Huang et al., 2022) combine textual, layout,
+and visual cues for document understanding, but
+they are primarily designed for single-vector pre-
+diction settings rather than fine-grained retrieval.
+Recent systems adopt a multi-vector late-
+interaction paradigm (Faysse et al., 2025; Xu et al.,
+2025; Team, 2025; Günther et al., 2025), in which
+a page is represented as asetof patch embeddings
+and relevance is computed by matching query to-
+kens against the strongest-scoring page patches.
+This formulation is effective for local cues such
+as words, table cells, or icons, but it biases scor-
+ing toward isolated matches. In multimodal pages,
+however, relevance often depends on page-level
+structure, namely how textual and visual elements
+are arranged and related across the page. Although
+some of this information may be present implic-
+itly in visual encoders (Maniparambil et al., 2024),
+it is not explicitly supervised and may be under-
+emphasized by late-interaction scoring. Our work
+addresses this limitation by introducing descriptor-
+guided structural supervision for late-interaction
+retrieval, implemented through an explicit global
+token trained jointly with local patch embeddings.
+Unlike global-pooling or CLS-token variants
+(Radford et al., 2021; Huang et al., 2022; Dosovit-
+skiy et al., 2021; Zhai et al., 2022), our contribution
+is not the use of a single additional vector by itself.
+Instead, we train a retrieval-aware global represen-
+tation with textual holistic page descriptors that
+summarize layout and organization during training
+only. This supervision encourages the encoder to
+represent cross-region structure while preserving
+the fine-grained local matching behavior of multi-
+vector retrieval, and it removes the need for textual
+descriptors at inference.
+6 Conclusions
+We proposed Gbl-Desc-FT, a visual retrieval
+model that augments patch-based encoders with a
+learned global token trained via textual descriptor-
+guided supervision. Our model addresses a
+core limitation of late-interaction visual retrievers,
+which fail to capture structural relevance beyond lo-
+cal matches. On ViDoRe-v2, our method achieves
+significant gains over strong baselines with fewer
+parameters. We observe the largest improvements
+on visually rich and multi-region documents. Ab-
+lations confirm that global context complements
+local features. Overall, our findings show that struc-
+tural signals can be learned as part of the retrieval
+representation itself, enabling more robust and scal-
+8
+able document retrieval across diverse layouts. Fu-
+ture work may extend our method beyond single-
+page retrieval to multi-page reasoning.
+References
+Mohammad Mahdi Abootorabi, Amirhosein Zobeiri,
+Mahdi Dehghani, Mohammadali Mohammadkhani,
+Bardia Mohammadi, Omid Ghahroodi, Mahdieh So-
+leymani Baghshah, and Ehsaneddin Asgari. 2025.
+Ask in any modality: A comprehensive survey on
+multimodal retrieval-augmented generation. InFind-
+ings of the Association for Computational Linguistics:
+ACL 2025, pages 16776–16809, Vienna, Austria. As-
+sociation for Computational Linguistics.
+Jason Ansel, Edward Yang, Horace He, Natalia
+Gimelshein, Animesh Jain, Michael V oznesensky,
+Bin Bao, Peter Bell, David Berard, Evgeni Burovski,
+Geeta Chauhan, Anjali Chourdia, Will Constable,
+Alban Desmaison, Zachary DeVito, Elias Ellison,
+Will Feng, Jiong Gong, Michael Gschwind, Brian
+Hirsh, Sherlock Huang, Kshiteej Kalambarkar, Lau-
+rent Kirsch, Michael Lazos, Mario Lezcano, Yanbo
+Liang, Jason Liang, Yinghai Lu, C. K. Luk, Bert Ma-
+her, Yunjie Pan, Christian Puhrsch, Matthias Reso,
+Mark Saroufim, Marcos Yukio Siraichi, Helen Suk,
+Shunting Zhang, Michael Suo, Phil Tillet, Xu Zhao,
+Eikan Wang, Keren Zhou, Richard Zou, Xiaodong
+Wang, Ajit Mathews, William Wen, Gregory Chanan,
+Peng Wu, and Soumith Chintala. 2024. Pytorch 2:
+Faster machine learning through dynamic python
+bytecode transformation and graph compilation. In
+Proceedings of the 29th ACM International Confer-
+ence on Architectural Support for Programming Lan-
+guages and Operating Systems, Volume 2, ASPLOS
+’24, page 929–947, New York, NY , USA. Association
+for Computing Machinery.
+Tianqi Chen, Bing Xu, Chiyuan Zhang, and Carlos
+Guestrin. 2016. Training deep nets with sublinear
+memory cost.arXiv preprint arXiv:1604.06174.
+Kuicai Dong, Yujing Chang, Xin Deik Goh, Dexun
+Li, Ruiming Tang, and Yong Liu. 2025. Mmdocir:
+Benchmarking multi-modal retrieval for long docu-
+ments.arXiv preprint arXiv:2501.08828.
+Alexey Dosovitskiy, Lucas Beyer, Alexander
+Kolesnikov, Dirk Weissenborn, Xiaohua Zhai,
+Thomas Unterthiner, Mostafa Dehghani, Matthias
+Minderer, Georg Heigold, Sylvain Gelly, Jakob
+Uszkoreit, and Neil Houlsby. 2021. An image
+is worth 16x16 words: Transformers for image
+recognition at scale.Preprint, arXiv:2010.11929.
+Manuel Faysse, Hugues Sibille, Tony Wu, Bilel Om-
+rani, Gautier Viaud, CELINE HUDELOT, and Pierre
+Colombo. 2025. Colpali: Efficient document re-
+trieval with vision language models. InThe Thir-
+teenth International Conference on Learning Repre-
+sentations.
+Michael Günther, Saba Sturua, Mohammad Kalim
+Akram, Isabelle Mohr, Andrei Ungureanu, Bo Wang,
+Sedigheh Eslami, Scott Martens, Maximilian Werk,
+Nan Wang, et al. 2025. jina-embeddings-v4: Univer-
+sal embeddings for multimodal multilingual retrieval.
+arXiv preprint arXiv:2506.18902.
+Michael Günther, Saba Sturua, Mohammad Kalim
+Akram, Isabelle Mohr, Andrei Ungureanu, Sedigheh
+Eslami, Scott Martens, Bo Wang, Nan Wang, and
+Han Xiao. 2025. jina-embeddings-v4: Universal
+embeddings for multimodal multilingual retrieval.
+Preprint, arXiv:2506.18902.
+Yupan Huang, Tengchao Lv, Lei Cui, Yutong Lu, and
+Furu Wei. 2022. Layoutlmv3: Pre-training for doc-
+ument ai with unified text and image masking. In
+Proceedings of the 30th ACM international confer-
+ence on multimedia, pages 4083–4091.
+Omar Khattab and Matei Zaharia. 2020. Colbert: Effi-
+cient and effective passage search via contextualized
+late interaction over bert. InProceedings of the 43rd
+International ACM SIGIR conference on research
+and development in Information Retrieval, pages 39–
+48.
+Patrick Lewis, Ethan Perez, Aleksandra Piktus, Fabio
+Petroni, Vladimir Karpukhin, Naman Goyal, Hein-
+rich Küttler, Mike Lewis, Wen-tau Yih, Tim Rock-
+täschel, Sebastian Riedel, and Douwe Kiela. 2020.
+Retrieval-augmented generation for knowledge-
+intensive nlp tasks. InAdvances in Neural Infor-
+mation Processing Systems, volume 33, pages 9459–
+9474. Curran Associates, Inc.
+Quentin Macé, António Loison, and Manuel Faysse.
+2025. Vidore benchmark v2: Raising the bar for
+visual retrieval.arXiv preprint arXiv:2505.17166.
+Mayug Maniparambil, Raiymbek Akshulakov,
+Yasser Abdelaziz Dahou Djilali, Mohamed EI Amine
+Seddik, Sanath Narayan, Karttikeya Mangalam, and
+Noel E. O’Connor. 2024. Do vision and language
+encoders represent the world similarly? In2024
+IEEE/CVF Conference on Computer Vision and
+Pattern Recognition (CVPR), pages 14334–14343.
+Lang Mei, Siyu Mo, Zhihan Yang, and Chong Chen.
+2025. A survey of multimodal retrieval-augmented
+generation.arXiv preprint arXiv:2504.08748.
+Junbo Niu, Zheng Liu, Zhuangcheng Gu, Bin Wang,
+Linke Ouyang, Zhiyuan Zhao, Tao Chu, Tianyao He,
+Fan Wu, Qintong Zhang, Zhenjiang Jin, et al. 2025.
+Mineru2.5: A decoupled vision-language model for
+efficient high-resolution document parsing.Preprint,
+arXiv:2509.22186.
+Xiangyu Peng, Cab Qin, Zeyuan Chen, Ran Xu, Caim-
+ing Xiong, and Chien-Sheng Wu. 2025. Unidoc-
+bench: A unified benchmark for document-centric
+multimodal rag.arXiv preprint arXiv:2510.03663.
+9
+Alec Radford, Jong Wook Kim, Chris Hallacy, Aditya
+Ramesh, Gabriel Goh, Sandhini Agarwal, Girish Sas-
+try, Amanda Askell, Pamela Mishkin, Jack Clark,
+et al. 2021. Learning transferable visual models from
+natural language supervision. InInternational confer-
+ence on machine learning, pages 8748–8763. PmLR.
+Nils Reimers and Iryna Gurevych. 2019. Sentence-
+BERT: Sentence embeddings using Siamese BERT-
+networks. InProceedings of the 2019 Conference on
+Empirical Methods in Natural Language Processing
+and the 9th International Joint Conference on Natu-
+ral Language Processing (EMNLP-IJCNLP), pages
+3982–3992, Hong Kong, China. Association for Com-
+putational Linguistics.
+Stephen Robertson, Steve Walker, Susan Jones, Miche-
+line Hancock-Beaulieu, and Mike Gatford. 1994.
+Okapi at trec-3. pages 0–.
+Aaditya Singh, Adam Fry, Adam Perelman, Adam Tart,
+Adi Ganesh, Ahmed El-Kishky, Aidan McLaughlin,
+Aiden Low, AJ Ostrow, Akhila Ananthram, et al.
+2025. Openai gpt-5 system card.arXiv preprint
+arXiv:2601.03267.
+Nomic Team. 2025. Nomic embed multimodal: Inter-
+leaved text, image, and screenshots for visual docu-
+ment retrieval.
+Liang Wang, Nan Yang, Xiaolong Huang, Linjun Yang,
+Rangan Majumder, and Furu Wei. 2024. Improv-
+ing text embeddings with large language models. In
+Proceedings of the 62nd Annual Meeting of the As-
+sociation for Computational Linguistics (Volume 1:
+Long Papers), pages 11897–11916, Bangkok, Thai-
+land. Association for Computational Linguistics.
+Haoran Wei, Chenglong Liu, Jinyue Chen, Jia Wang,
+Lingyu Kong, Yanming Xu, Zheng Ge, Liang Zhao,
+Jianjian Sun, Yuang Peng, Chunrui Han, and Xi-
+angyu Zhang. 2024. General ocr theory: Towards
+ocr-2.0 via a unified end-to-end model.Preprint,
+arXiv:2409.01704.
+Haoran Wei, Yaofeng Sun, and Yukun Li. 2025.
+Deepseek-ocr: Contexts optical compression.arXiv
+preprint arXiv:2510.18234.
+Thomas Wolf, Lysandre Debut, Victor Sanh, Julien
+Chaumond, Clement Delangue, Anthony Moi, Pier-
+ric Cistac, Tim Rault, Rémi Louf, Morgan Funtowicz,
+Joe Davison, Sam Shleifer, Patrick von Platen, Clara
+Ma, Yacine Jernite, Julien Plu, Canwen Xu, Teven Le
+Scao, Sylvain Gugger, Mariama Drame, Quentin
+Lhoest, and Alexander M. Rush. 2020. Transform-
+ers: State-of-the-art natural language processing. In
+Proceedings of the 2020 Conference on Empirical
+Methods in Natural Language Processing: System
+Demonstrations, pages 38–45, Online. Association
+for Computational Linguistics.
+Junda Wu, Yu Xia, Tong Yu, Xiang Chen, Sai Sree Har-
+sha, Akash V Maharaj, Ruiyi Zhang, Victor Bursztyn,
+Sungchul Kim, Ryan A. Rossi, Julian McAuley, Yun-
+yao Li, and Ritwik Sinha. 2025. Doc-react: Multi-
+page heterogeneous document question-answering.
+InProceedings of the 63rd Annual Meeting of the
+Association for Computational Linguistics (Volume
+2: Short Papers), pages 67–78, Vienna, Austria. As-
+sociation for Computational Linguistics.
+Mengyao Xu, Gabriel Moreira, Ronay Ak, Radek Os-
+mulski, Yauhen Babakhin, Zhiding Yu, Benedikt
+Schifferer, and Even Oldridge. 2025. Llama nemore-
+triever colembed: Top-performing text-image re-
+trieval model.arXiv preprint arXiv:2507.05513.
+Yang Xu, Yiheng Xu, Tengchao Lv, Lei Cui, Furu
+Wei, Guoxin Wang, Yijuan Lu, Dinei Florencio, Cha
+Zhang, Wanxiang Che, Min Zhang, and Lidong Zhou.
+2021. LayoutLMv2: Multi-modal pre-training for
+visually-rich document understanding. InProceed-
+ings of the 59th Annual Meeting of the Association for
+Computational Linguistics and the 11th International
+Joint Conference on Natural Language Processing
+(Volume 1: Long Papers), pages 2579–2591, Online.
+Association for Computational Linguistics.
+Yiheng Xu, Minghao Li, Lei Cui, Shaohan Huang, Furu
+Wei, and Ming Zhou. 2020. Layoutlm: Pre-training
+of text and layout for document image understanding.
+InProceedings of the 26th ACM SIGKDD interna-
+tional conference on knowledge discovery & data
+mining, pages 1192–1200.
+Xiaohua Zhai, Xiao Wang, Basil Mustafa, Andreas
+Steiner, Daniel Keysers, Alexander Kolesnikov,
+and Lucas Beyer. 2022. Lit: Zero-shot trans-
+fer with locked-image text tuning.Preprint,
+arXiv:2111.07991.
+10
+7 Appendix
+7.1 Prompt for Textual Baseline
+The instructions provided to GPT-5 for generating
+textual summaries from images of document pages
+is displayed in the following. The prompt guides
+the model to produce plain -text descriptions that
+capture the main ideas and relevant details, while
+avoiding verbatim transcription or formatting arti-
+facts:
+You are given an image representing
+a single page from a PDF document. Your
+task is to produce a concise plain-text
+summary of the content in the image. Do
+not include any formatting tokens such as
+bold text, bullet points, or other markup;
+the output should be plain text only. Read
+the visible text and summarize its main
+ideas, key points, and relevant details
+instead of transcribing it verbatim. If
+any text is unclear or partially visible,
+note that it is unreadable rather than
+guessing. For non-text elements such
+as images, charts, or diagrams, briefly
+describe their content and placement.
+7.2 Global Textual Descriptors
+The instructions provided to GPT -5 for generat-
+ing high-level textual descriptions of images are
+shown below. The prompt directs the model to fo-
+cus on overall scene composition, spatial arrange-
+ment, and thematic content, avoiding fine-grained
+details unless they dominate the image:
+You are given an image and must
+produce a concise yet informative textual
+description that captures its overall
+scene, structure, and high-level visual
+concepts. Focus on the broad composition,
+spatial arrangement, and thematic content
+that can be perceived without examining
+small details, describing the type
+of scene or setting, the general
+layout, dominant visual patterns, and
+the main purpose or activity depicted
+if relevant. Avoid mentioning small
+objects, text fragments, or fine-grained
+elements unless they dominate the entire
+image, and use clear, natural language
+that reflects the image’s global visual
+meaning.
+7.3 Implementation Details
+The vision and text encoders are initialized
+from ColQwen2.5 pretrained LoRA adapters and
+weights. The new [global] token embedding is
+initialized randomly and added to the model’s vo-
+cabulary. Base encoder weights remain frozen;
+only LoRA parameters and the retrieval projection
+head are updated. We fine-tune Gbl-Desc-FT for
+6 epochs with a batch size of 128 using AdamW
+with a learning rate of 5×10 −5, weight de-
+cay 10−4, and a linear warm-up over the first
+100 steps. CrossContext-FT is tuned with early
+stopping on the development set, converging af-
+ter approximately 0.25 epochs, compared to 6
+epochs for Gbl-Desc-FT. This reflects task diffi-
+culty rather than overfitting: CrossContext-FT
+has direct access to text descriptors at inference
+time, while Gbl-Desc-FT must internalize the
+same structural priors into the visual global to-
+ken without textual input, a harder objective that
+requires more training to converge. We train in
+bfloat16 precision and enable gradient check-
+pointing (Chen et al., 2016) to maximize mem-
+ory efficiency on the GPU. We conduct all train-
+ing and evaluation on a single NVIDIA H200
+GPU (141 GB memory) using PyTorch (Ansel
+et al., 2024) and the HuggingFace Transformers
+library (Wolf et al., 2020). Our Gbl-Desc-FT
+implementation extends the open-source ColPali
+framework (Faysse et al., 2025), adapting its mul-
+timodal retrieval pipeline to incorporate global
+textual descriptions alongside local visual tokens.
+All baselines (llama-nemoretriever-colembed,
+colnomic-embed-multimodal) are evaluated us-
+ing their official HuggingFace implementations.
+We set the temperature τ= 0.02 . We generate
+the textual global descriptors using GPT-5 (Singh
+et al., 2025).
+7.4 Performance by Query Type: Global
+layout vs. Local Detail Oriented
+We label each query in ViDoRe-v2 as eitherdetail-
+orientedorlayout-orientedusingGPT-5.
+Figure 5 shows the performance of
+Gbl-Desc-FT on layout oriented queries in
+comparison with Nemo-3b. The largest im-
+provements belongs to the layout-rich ESGH
+and ESGR datasets, showing the soundness of
+the trained layout encoder. These two datasets
+contain multiple visual regions per page (tables,
+charts, and multi-column text), and relevance
+1
+Biomedical ESGH ESGR Average
+40
+45
+50
+55
+60
+65
+70nDCG Score
+-0.6 (-1.0%)
++2.8 (+4.2%)
++3.1 (+7.2%)
++1.8 (+3.1%)
+nDCG - Global
+Biomedical ESGH ESGR Average
+30
+35
+40
+45
+50
+55
+60
+65MAP Score
+-1.6 (-3.0%)
++2.2 (+3.6%)
++4.2 (+12.9%)
++1.7 (+3.5%)
+MAP - Global
+Method
+Nemoretriever-3b Ours
+Figure 5: Performance on holistic -context queries:
+Comparison of our Gbl-Desc-FT model with Nemo-3b
+across Biomedical, ESGH, and ESGR datasets, and
+averaged results. Bars show nDCG@5 (top) and MAP@5
+(bottom). Green arrows show absolute and relative in-
+creases of performance, red arrows show decreases.
+Dataset Local Global
+Economics 2 230
+Biomedical 195 445
+ESG Human-Labeled 41 11
+ESG Restaurant 128 100
+Table 6: The number of detail-oriented (local) and
+layout-oriented (global) queries per ViDoRe-v2 dataset.
+frequently depends on how these elements are
+spatially organized. In contrast, the Biomedical
+dataset is largely text dominant and contains many
+detail-oriented queries. Therefore, global layout
+information is less predictive for this dataset.
+In such cases, Nemo-3b, which is optimized for
+localized visual cues, performs comparatively
+well.
+7.5 Spatial Shannon Entropy
+We quantify the spatial dispersion of layout ele-
+ments by computing the Shannon entropy of their
+center-point distribution over a G×G grid. Let
+B={b 1, . . . , bN } be the set of detected blocks,
+and ck =
+
+x(k)
+min+x(k)
+max
+2 , y(k)
+min+y(k)
+max
+2
+
+their normal-
+ized center coordinates. Each ck is assigned to a
+grid cell (i, j), with counts nij and cell probabil-
+ities pij =n ij/N. The spatial Shannon entropy
+is then Hspatial =− PG
+i=1
+PG
+j=1 pij logp ij, where
+pij = 0 terms are omitted. Higher Hspatial values in-
+dicate that elements are more uniformly distributed
+across the page, whereas lower values reflect spa-
+tial concentration.
+2
