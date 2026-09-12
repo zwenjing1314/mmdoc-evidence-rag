@@ -1,0 +1,3 @@
+exp_id,exp_date,dataset,split,query_count,config,run_dir,backend,page_r_at_5,region_hit_at_5,sufficiency_rate,note
+EXP-DEMO,,demo,-,,configs/experiments/demo_page_region.yaml,runs/retrieval/demo_page_region/latest,,...,,-,模板行
+EXP-001,,mmdocir_evaluation,-,,configs/experiments/mmdocir_colpali_smoke.yaml,runs/retrieval/mmdocir_colpali_smoke/latest,,...,,-,ColPali smoke 待登记
