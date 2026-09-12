@@ -1,0 +1,15 @@
+# New naming draft (step 7). NOT used by tasks.ps1 yet.
+# Old file: configs/experiments/mmdocir_colpali_smoke.yaml (kept, working)
+# Verify before switching: run EXP-001 equivalent with this config, then mark old deprecated.
+experiment_name: mmdocir__phase1a__colpali-page-smoke
+dataset: mmdocir_evaluation
+retriever:
+  type: colpali_page
+  search_scope: document
+  model: vidore/colpali
+  top_k: 5
+  image_batch_size: 1
+  query_batch_size: 2
+  score_batch_size: 4
+  use_embedding_cache: true
+output_dir: runs/retrieval/mmdocir__phase1a__colpali-page-smoke

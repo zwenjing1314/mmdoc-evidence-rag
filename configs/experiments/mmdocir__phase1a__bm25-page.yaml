@@ -1,0 +1,9 @@
+# New naming draft (step 7). NOT used by tasks.ps1 yet.
+# Old file: configs/experiments/mmdocir_bm25_page.yaml (kept, working)
+experiment_name: mmdocir__phase1a__bm25-page
+dataset: mmdocir_evaluation
+retriever:
+  type: bm25_page
+  search_scope: document
+  top_k: 20
+output_dir: runs/retrieval/mmdocir__phase1a__bm25-page

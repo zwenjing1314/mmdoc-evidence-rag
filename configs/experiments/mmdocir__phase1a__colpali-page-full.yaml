@@ -1,0 +1,16 @@
+# New naming draft (step 7). NOT used by tasks.ps1 yet.
+# Old file: configs/experiments/mmdocir_colpali.yaml (kept, working)
+# Verify before switching: run ./tasks.ps1 mmdocir-full equivalent with this config, then mark old deprecated.
+experiment_name: mmdocir__phase1a__colpali-page-full
+dataset: mmdocir_evaluation
+retriever:
+  type: colpali_page
+  search_scope: document
+  model: vidore/colpali
+  top_k: 20
+  # RTX 3080 Ti (12 GB): start conservatively. Embeddings are cached under artifacts/.
+  image_batch_size: 1
+  query_batch_size: 2
+  score_batch_size: 4
+  use_embedding_cache: true
+output_dir: runs/retrieval/mmdocir__phase1a__colpali-page-full
