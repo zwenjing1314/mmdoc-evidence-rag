@@ -19,7 +19,7 @@
 2. `docs/02-commands.md`（stable, SSOT）：命令唯一入口
 3. `docs/03-glossary.md`（stable）：术语
 
-## 现行研究（六篇闭环）
+## 现行研究
 
 - `docs/10-small-paper/plan.md`（SSOT）：方向 + Phase Gate
 - `docs/10-small-paper/protocol.md`（SSOT）：协议 + 防泄漏
@@ -27,11 +27,11 @@
 - `docs/10-small-paper/results-test.md`（引用页 → `docs/paper/03`）
 - `docs/10-small-paper/roadmap.md`（引用页 → `docs/paper/research_positioning_and_roadmap`）
 - `docs/10-small-paper/plan-source-final.md`：拆分源（只读）
-- `method-spec.md` 待 Phase 2 Gate 后再建
+- `docs/10-small-paper/method-spec.md` 待 Phase 2 Gate 后再建
 
 ## 实验过程
 
-- `experiments/registry.csv`：注册表（EXP-001 完成、EXP-002 待重跑）
+- `experiments/registry.csv`：注册表（EXP-001 历史 smoke、EXP-002 历史 full，均需按当前代码重跑）
 - `experiments/templates/experiment-record.md`：11 段模板
 - `docs/20-experiments/mmdocir-external.md`：MMDocIR 外部验证引用页（→ `docs/paper/04`）
 

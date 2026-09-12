@@ -145,10 +145,11 @@ def run_retrieval(config_path: Path, split_name: str | None = None) -> Path:
     _ACTIVE_RETRIEVAL_STARTED_AT = started_at
     config = load_config(config_path)
     dataset = str(config["dataset"])
+    processed_dataset = str(config.get("processed_dataset", dataset))
     retriever = config.get("retriever", {})
     retriever_type = str(retriever.get("type", "bm25_page"))
     experiment_name = str(config.get("experiment_name", f"{dataset}_{retriever_type}"))
-    processed_dir = data_root() / "processed" / dataset
+    processed_dir = data_root() / "processed" / processed_dataset
     documents, pages, nodes, queries = read_processed_dataset(processed_dir)
     documents, pages, nodes, queries, split_info, split_manifest = apply_data_split(
         config, dataset, documents, pages, nodes, queries, split_name
@@ -237,10 +238,17 @@ def run_retrieval(config_path: Path, split_name: str | None = None) -> Path:
             {
                 "experiment_name": experiment_name,
                 "dataset": dataset,
+                "processed_dataset": processed_dataset,
                 "retriever_type": retriever_type,
                 "hits": len(hits),
                 "actual_retrievers": sorted({hit.retriever for hit in hits}),
                 "data_split": split_info,
+                "data_counts": {
+                    "documents": len(documents),
+                    "pages": len(pages),
+                    "nodes": len(nodes),
+                    "queries": len(queries),
+                },
             },
             indent=2,
             ensure_ascii=False,

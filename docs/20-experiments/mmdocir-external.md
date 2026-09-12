@@ -5,6 +5,6 @@
 
 - 页面级（`BAAI/bge-m3, max_length=512, batch_size=2`）：BM25 R@5 `0.7521`；Dense `0.7304`；Hybrid `0.7600` 最好，MRR `0.6143`、nDCG@5 `0.6083`
 - 口径：页面 gold 全覆盖 1658；布局精确 gold 仅 1598/1658，页面与布局指标分开报；页面方法无 `node_id`，`region_hit@5` 不适用
-- 运行记录：BM25/Dense/Hybrid 三 run 目录见 `04_mmdocir_results.md`；ColPali 全量见 `experiments/registry.csv` EXP-002
+- 运行记录：BM25/Dense/Hybrid 三 run 目录见 `04_mmdocir_results.md`；ColPali 历史 run 见 `experiments/registry.csv` EXP-002，但正式 full baseline 待按当前代码重跑
 - 下一步：`configs/experiments/mmdocir_layout_node_bge_m3.yaml` 布局节点基线（Phase 1B 预备）；耗时以 `experiment_elapsed` 为准
 - 详情表见 `docs/paper/04_mmdocir_results.md`

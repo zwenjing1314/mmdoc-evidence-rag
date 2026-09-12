@@ -7,8 +7,8 @@
 
 | config | 数据集/阶段 | 状态 | 说明 |
 | --- | --- | --- | --- |
-| `experiments/mmdocir_colpali_smoke.yaml` | mmdocir / Phase 1A smoke | working | EXP-001，小样本 `top_k=5`，只验流程 |
-| `experiments/mmdocir_colpali.yaml` | mmdocir / Phase 1A full | working | EXP-002 待跑，`top_k=20`，保守 batch 见文件注释 |
+| `experiments/mmdocir_colpali_smoke.yaml` | mmdocir / Phase 1A smoke | working | EXP-001，小样本 `top_k=5`，读取独立 `mmdocir_evaluation_smoke` |
+| `experiments/mmdocir_colpali.yaml` | mmdocir / Phase 1A full | working | EXP-002 待读取全量 `mmdocir_evaluation`，`top_k=20`，保守 batch 见文件注释 |
 | `experiments/mmdocir_bm25_page.yaml` | mmdocir / Phase 1A | working | BM25 对照 |
 | `experiments/mmdocir_dense_page_bge_m3.yaml` | mmdocir / Phase 1A | working | Dense 对照（需本地 bge-m3） |
 | `experiments/mmdocir_hybrid_page_bge_m3.yaml` | mmdocir / Phase 1A | working | Hybrid 对照 |

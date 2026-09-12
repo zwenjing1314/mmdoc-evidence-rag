@@ -12,9 +12,9 @@
 
 ## 3. 数据和 split
 
-- 数据集：`mmdocir_evaluation`
-- split：无 / 小样本（`run_info.hits=30`）
-- 数据版本：MMDocIR 外部集，313 文档 / 20395 页 / 170338 节点 / 1658 问题（见 `docs/01-quickstart.md` 第 4 节）
+- 数据集：`mmdocir_evaluation`，处理目录：`mmdocir_evaluation_smoke`
+- split：无 / 1 文档 smoke（6 queries、23 pages、153 nodes、`hits=30`）
+- 数据版本：从 MMDocIR 外部集截取 1 个文档，仅用于流程验证
 
 ## 4. 配置文件
 
@@ -29,7 +29,7 @@
 
 ## 6. 代码 commit
 
-- 冻结提交 `2f8587f`（实验本身产自更早 commit，见 `FREEZE-20260912.md`）
+- 历史 run 产自冻结前版本；新任务会把处理目录写入 `run_info.json`，避免与 full 数据混淆
 
 ## 7. 输出目录
 
@@ -39,7 +39,7 @@
 
 - Page R@1/5/10：`0.8333 / 1.0 / 1.0`
 - MRR / nDCG@5 / nDCG@10：`0.9167 / 0.8945 / 0.8945`
-- Region Hit@5：`0.0`（页级方法不返 `node_id`，不适用）
+- Region Hit@5：`NA`（页级方法不返回 `node_id`，不适用）
 
 ## 9. 错误信息
 

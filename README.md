@@ -1,8 +1,15 @@
 # mmdoc-evidence-rag
 
-面向多模态长文档的多粒度证据检索与可信生成实验仓库。
+面向视觉文档证据检索的实验仓库。当前小论文主线是：先验证 ColPali 的页面级基线与页面内证据区域缺口，再决定是否训练布局约束 Patch 融合模块。
 
-当前阶段目标：先完成开题前可展示的最小实验闭环，而不是一次性铺满全部论文实验。
+## 从这里开始
+
+1. 阅读 [docs/00-index.md](docs/00-index.md)，了解唯一入口和当前阶段。
+2. 按 [docs/01-quickstart.md](docs/01-quickstart.md) 配置 Windows 环境与数据目录。
+3. 只通过 [docs/02-commands.md](docs/02-commands.md) 或 `./tasks.ps1` 运行实验。
+4. 实验结果登记在 [experiments/registry.csv](experiments/registry.csv)，详情放在 `experiments/`。
+
+当前 Gate：ColPali full baseline（Phase 1A）完成并核验为 1,658 queries 后，才能进入 Phase 1B 区域缺口诊断。
 
 ## Project Skill
 
@@ -44,24 +51,12 @@ $mmdoc-evidence-research 请分析当前 evidence set 实验的下一步
 
 主规则见 [skills/mmdoc-evidence-research/SKILL.md](skills/mmdoc-evidence-research/SKILL.md)，详细研究边界和实验规范见其 `references/` 目录。
 
-## Immediate Goal
-
-开题前优先完成：
-
-1. 统一整理 MMDocIR 与中文年报数据目录。
-2. 将数据转换为统一中间格式：`documents / pages / nodes / queries`。
-3. 跑通检索预实验：`BM25-page`、`Dense-page`、`Layout-aware node`、`Page -> Region`。
-4. 产出第一张检索结果表与若干成功/失败案例。
-
 ## Quick Demo
 
 真实数据放入前，可以先跑内置 demo，确认完整实验闭环：
 
 ```bash
-uv run mdr prepare --dataset demo
-uv run mdr retrieve --config configs/experiments/demo_page_region.yaml
-uv run mdr evaluate --run runs/retrieval/demo_page_region/latest
-uv run mdr export-demo --run runs/retrieval/demo_page_region/latest
+./tasks.ps1 demo
 ```
 
 输出位置：
@@ -74,8 +69,7 @@ artifacts/figures/opening_experiment_table.md
 如果要跑页面级 BM25 baseline：
 
 ```bash
-uv run mdr retrieve --config configs/experiments/demo_bm25_page.yaml
-uv run mdr evaluate --run runs/retrieval/demo_bm25_page/latest
+./tasks.ps1 demo-bm25
 ```
 
 ## Repository Layout
@@ -101,22 +95,16 @@ uv python install 3.11
 uv sync --dev
 ```
 
-PyCharm 中选择：
+IDE 中选择项目环境的 Python：Windows 通常为 `.venv\Scripts\python.exe`；如果使用已验证的 Conda GPU 环境，则选择 `C:\Users\WenJing\anaconda3\envs\colpali\python.exe`。
 
-```text
-.venv/bin/python
-```
-
-详细步骤见：
-
-[docs/environment/environment_setup.md](docs/environment/environment_setup.md)
+详细步骤见 [docs/01-quickstart.md](docs/01-quickstart.md)。旧环境说明已移入 `docs/90-archive/`，不再作为入口。
 
 ## Data Placement
 
-请把下载好的数据放到：
+MMDocIR 原始数据建议放在项目外，并通过 `MMDOCIR_EVALUATION_ROOT` 指向数据集目录；未设置变量时，程序才会 fallback 到 `data/raw/mmdocir_evaluation/`。中文年报原始数据放到：
 
 ```text
-data/raw/mmdocir/
+data/raw/mmdocir_evaluation/
 data/raw/cn_annual_reports/pdfs/
 ```
 

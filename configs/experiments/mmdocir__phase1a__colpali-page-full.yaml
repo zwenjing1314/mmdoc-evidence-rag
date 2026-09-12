@@ -3,6 +3,7 @@
 # Verify before switching: run ./tasks.ps1 mmdocir-full equivalent with this config, then mark old deprecated.
 experiment_name: mmdocir__phase1a__colpali-page-full
 dataset: mmdocir_evaluation
+processed_dataset: mmdocir_evaluation
 retriever:
   type: colpali_page
   search_scope: document

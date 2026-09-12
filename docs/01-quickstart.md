@@ -52,8 +52,9 @@ $env:MMDOCIR_EVALUATION_ROOT = "D:\MMDocIR_Evaluation_Dataset"  # 按本机实�
 标准产物在项目内（均被 `.gitignore` 忽略，不进 git）：
 
 ```text
-data/raw/mmdocir_evaluation/        # 原始（或外指）
-data/processed/mmdocir_evaluation/  # documents/pages/nodes/queries.parquet
+data/raw/mmdocir_evaluation/        # 未设置 MMDOCIR_EVALUATION_ROOT 时的 fallback
+data/processed/mmdocir_evaluation/        # full: documents/pages/nodes/queries.parquet
+data/processed/mmdocir_evaluation_smoke/  # smoke: separate 1-document copy
 data/interim/mmdocir_evaluation/page_images/  # 页面图，colpali 必需
 ```
 
@@ -63,6 +64,13 @@ data/interim/mmdocir_evaluation/page_images/  # 页面图，colpali 必需
 输入：MMDOCIR_Evaluation_Dataset 下 MMDocIR_annotations.jsonl + MMDocIR_pages.parquet + MMDocIR_layouts.parquet
 输出：data/processed/mmdocir_evaluation/*.parquet（313 文档、20395 页、170338 节点、1658 问题）
 检查：pages.parquet 中 page_image_path 存在，否则 colpali 直接报错停掉
+
+```
+
+Smoke 必须写入独立目录，不能用 `--limit-docs` 覆盖 full 目录：
+
+```powershell
+uv run mdr prepare --dataset mmdocir_evaluation --limit-docs 1 --output-dataset mmdocir_evaluation_smoke
 ```
 
 ## 5. 中文年报数据（SSOT 引用）

@@ -13,13 +13,13 @@ def resolve_page_image_path(page: PageRecord) -> Path:
     """Return a usable page image path or explain how to generate one."""
     if not page.page_image_path:
         raise FileNotFoundError(
-            f"Page `{page.page_id}` has no page_image_path. Re-run `mdr prepare --dataset mmdocir` "
+            f"Page `{page.page_id}` has no page_image_path. Re-run `mdr prepare --dataset mmdocir_evaluation` "
             "after downloading MMDocIR_pages.parquet with its image_binary column."
         )
     path = Path(page.page_image_path)
     if not path.is_file():
         raise FileNotFoundError(
-            f"Missing page image for `{page.page_id}`: {path}. Re-run `mdr prepare --dataset mmdocir` "
+            f"Missing page image for `{page.page_id}`: {path}. Re-run `mdr prepare --dataset mmdocir_evaluation` "
             "on this machine so the page JPEGs are materialized under data/interim."
         )
     return path

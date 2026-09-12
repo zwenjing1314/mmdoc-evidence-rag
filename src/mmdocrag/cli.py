@@ -28,9 +28,15 @@ def prepare(
     limit_docs: Annotated[
         int | None, typer.Option(help="Optional document limit for quick experiments.")
     ] = None,
+    output_dataset: Annotated[
+        str | None,
+        typer.Option(
+            help="Optional processed-directory name; use a separate name for smoke data."
+        ),
+    ] = None,
 ) -> None:
     """Prepare raw data into standard parquet tables."""
-    result = prepare_dataset(dataset, limit_docs=limit_docs)
+    result = prepare_dataset(dataset, limit_docs=limit_docs, output_dataset=output_dataset)
     table = Table(title="Prepare Result")
     table.add_column("Field")
     table.add_column("Value")

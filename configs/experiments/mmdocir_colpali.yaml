@@ -1,5 +1,6 @@
 experiment_name: mmdocir_colpali
 dataset: mmdocir_evaluation
+processed_dataset: mmdocir_evaluation
 retriever:
   type: colpali_page
   search_scope: document

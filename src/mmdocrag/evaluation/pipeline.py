@@ -15,8 +15,9 @@ from mmdocrag.schemas import QueryRecord, RetrievalHit
 def evaluate_run(run: Path) -> dict[str, float]:
     run_dir = resolve_run_dir(run)
     run_info = json.loads((run_dir / "run_info.json").read_text(encoding="utf-8"))
-    queries = load_run_queries(run_dir, run_info)
     hits = read_hits(run_dir / "predictions.parquet")
+    queries = load_run_queries(run_dir, run_info)
+    validate_run_alignment(run_dir, run_info, queries, hits)
     metrics = evaluate_metrics(queries, hits)
     (run_dir / "metrics.json").write_text(
         json.dumps(metrics, indent=2, ensure_ascii=False), encoding="utf-8"
@@ -26,10 +27,48 @@ def evaluate_run(run: Path) -> dict[str, float]:
     return metrics
 
 
+def validate_run_alignment(
+    run_dir: Path,
+    run_info: dict,
+    queries: list[QueryRecord],
+    hits: list[RetrievalHit],
+) -> None:
+    """Reject evaluation when the processed dataset does not match the run.
+
+    Processed tables are shared and a smoke ``prepare`` can replace a full
+    dataset.  Without this check, evaluation can silently score a run against
+    the wrong query subset and still produce plausible-looking metrics.
+    """
+    expected_query_ids = {query.query_id for query in queries}
+    predicted_query_ids = {hit.query_id for hit in hits}
+    if expected_query_ids != predicted_query_ids:
+        missing = sorted(expected_query_ids - predicted_query_ids)
+        extra = sorted(predicted_query_ids - expected_query_ids)
+        raise ValueError(
+            f"Run/data mismatch for {run_dir}: processed dataset has "
+            f"{len(expected_query_ids)} queries but predictions contain "
+            f"{len(predicted_query_ids)} different queries. "
+            f"Missing predictions={missing[:5]}; unexpected predictions={extra[:5]}. "
+            "Prepare the same dataset scope used by the run before evaluating."
+        )
+
+    data_counts = run_info.get("data_counts")
+    if isinstance(data_counts, dict):
+        recorded_queries = data_counts.get("queries")
+        if recorded_queries is not None and int(recorded_queries) != len(queries):
+            raise ValueError(
+                f"Run/data mismatch for {run_dir}: run recorded "
+                f"{recorded_queries} queries but current data has {len(queries)}."
+            )
+
+
 def load_run_queries(run_dir: Path, run_info: dict) -> list[QueryRecord]:
     """Load exactly the query split that produced a retrieval run."""
     dataset = str(run_info["dataset"])
-    documents, pages, nodes, queries = read_processed_dataset(data_root() / "processed" / dataset)
+    processed_dataset = str(run_info.get("processed_dataset", dataset))
+    documents, pages, nodes, queries = read_processed_dataset(
+        data_root() / "processed" / processed_dataset
+    )
     split_info = run_info.get("data_split")
     if not split_info:
         return queries

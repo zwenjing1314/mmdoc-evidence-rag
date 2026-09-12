@@ -19,6 +19,7 @@ param(
 
 $ErrorActionPreference = "Stop"
 $ProjectRoot = $PSScriptRoot
+Set-Location -LiteralPath $ProjectRoot
 
 function Get-CondaEnv {
   if ($env:CONDA_DEFAULT_ENV) { return $env:CONDA_DEFAULT_ENV }
@@ -56,6 +57,16 @@ function Assert-FileExists {
     Write-Host "missing prerequisite: $Path"
     if ($Hint) { Write-Host "  -> $Hint" }
     throw "missing prerequisite: $Path"
+  }
+}
+
+function Assert-MmdocirFullData {
+  if (-not $env:UV_CACHE_DIR) { $env:UV_CACHE_DIR = ".uv-cache" }
+  $check = "import polars as pl, sys; root='data/processed/mmdocir_evaluation'; counts={name: pl.read_parquet(f'{root}/{name}.parquet').height for name in ['documents','pages','nodes','queries']}; print('full data counts:', counts); expected={'documents':313,'pages':20395,'nodes':170338,'queries':1658}; sys.exit(0 if counts == expected else 1)"
+  Write-Host "CHECK: data/processed/mmdocir_evaluation must be the frozen full MMDocIR preparation"
+  & uv run python -c $check
+  if ($LASTEXITCODE -ne 0) {
+    throw "MMDocIR full data check failed. Run uv run mdr prepare --dataset mmdocir_evaluation without --limit-docs."
   }
 }
 
@@ -100,19 +111,24 @@ switch ($Task) {
     if (-not $env:HF_HOME) { $env:HF_HOME = "artifacts/hf_cache" }
     Assert-FileExists "configs/experiments/mmdocir_colpali_smoke.yaml" "do not rename old config, see step 7"
     Show-ExpHeader -ExpId "EXP-001" -EnvName "colpali (uv --extra colpali, CUDA/MPS)" -Config "configs/experiments/mmdocir_colpali_smoke.yaml" -Dataset "mmdocir_evaluation" -SplitName "-" -Output "runs/retrieval/mmdocir_colpali_smoke/<timestamp>"
-    Write-Host "prereq: run mdr prepare --dataset mmdocir_evaluation first; see docs/01-quickstart.md"
+    Write-Host "prepare: writing the 1-document smoke dataset to data/processed/mmdocir_evaluation_smoke"
+    Invoke-Mdr @("prepare","--dataset","mmdocir_evaluation","--limit-docs","1","--output-dataset","mmdocir_evaluation_smoke")
     Invoke-Mdr @("retrieve","--config","configs/experiments/mmdocir_colpali_smoke.yaml")
     Invoke-Mdr @("evaluate","--run","runs/retrieval/mmdocir_colpali_smoke/latest")
   }
   "mmdocir-full" {
     if (-not $env:HF_HOME) { $env:HF_HOME = "artifacts/hf_cache" }
     Assert-FileExists "configs/experiments/mmdocir_colpali.yaml" "full baseline config, see configs/README.md"
+    Assert-FileExists "data/processed/mmdocir_evaluation/documents.parquet" "run mdr prepare --dataset mmdocir_evaluation without --limit-docs"
+    Assert-MmdocirFullData
     Show-ExpHeader -ExpId "EXP-002" -EnvName "colpali (uv --extra colpali, CUDA/MPS)" -Config "configs/experiments/mmdocir_colpali.yaml" -Dataset "mmdocir_evaluation" -SplitName "-" -Output "runs/retrieval/mmdocir_colpali/<timestamp>"
     Write-Host "Phase 1A full baseline top_k=20; embedding cache: artifacts/colpali/"
     Invoke-Mdr @("retrieve","--config","configs/experiments/mmdocir_colpali.yaml")
     Invoke-Mdr @("evaluate","--run","runs/retrieval/mmdocir_colpali/latest")
   }
   "mmdocir-bm25" {
+    Assert-FileExists "data/processed/mmdocir_evaluation/documents.parquet" "run mdr prepare --dataset mmdocir_evaluation without --limit-docs"
+    Assert-MmdocirFullData
     Show-ExpHeader -ExpId "EXP-MMDOCIR-BM25" -EnvName "base (uv)" -Config "configs/experiments/mmdocir_bm25_page.yaml" -Dataset "mmdocir_evaluation" -SplitName "-" -Output "runs/retrieval/mmdocir_bm25_page/<timestamp>"
     Invoke-Mdr @("retrieve","--config","configs/experiments/mmdocir_bm25_page.yaml")
     Invoke-Mdr @("evaluate","--run","runs/retrieval/mmdocir_bm25_page/latest")

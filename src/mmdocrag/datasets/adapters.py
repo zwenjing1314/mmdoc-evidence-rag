@@ -64,11 +64,15 @@ UNIT_PATTERN = re.compile(r"单位[：:]\s*([人民币元万元亿元百万元�
 
 
 # 不同数据集选择不同的处理函数
-def prepare_dataset(dataset: str, limit_docs: int | None = None) -> PrepareResult:
+def prepare_dataset(
+    dataset: str,
+    limit_docs: int | None = None,
+    output_dataset: str | None = None,
+) -> PrepareResult:
     if dataset == "demo":
         return prepare_demo(limit_docs=limit_docs)
     if dataset in {"mmdocir", "mmdocir_evaluation"}:
-        return prepare_mmdocir(limit_docs=limit_docs)
+        return prepare_mmdocir(limit_docs=limit_docs, output_dataset=output_dataset)
     if dataset in {"cn_annual_reports", "cn_reports"}:
         return prepare_cn_annual_reports(limit_docs=limit_docs)
     raise ValueError(f"Unknown dataset: {dataset}. Choose demo, mmdocir, or cn_annual_reports.")
@@ -215,10 +219,14 @@ def prepare_demo(limit_docs: int | None = None) -> PrepareResult:
     )
 
 
-def prepare_mmdocir(limit_docs: int | None = None) -> PrepareResult:
+def prepare_mmdocir(
+    limit_docs: int | None = None,
+    output_dataset: str | None = None,
+) -> PrepareResult:
     dataset = "mmdocir_evaluation"
     raw_dir = Path(os.getenv("MMDOCIR_EVALUATION_ROOT", data_root() / "raw" / dataset))
-    processed_dir = data_root() / "processed" / dataset
+    processed_name = output_dataset or dataset
+    processed_dir = data_root() / "processed" / processed_name
     annotations_path = raw_dir / "MMDocIR_annotations.jsonl"
     pages_path = raw_dir / "MMDocIR_pages.parquet"
     layouts_path = raw_dir / "MMDocIR_layouts.parquet"

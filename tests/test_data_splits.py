@@ -2,10 +2,10 @@ from __future__ import annotations
 
 import pytest
 
-from mmdocrag.evaluation.pipeline import load_run_queries
+from mmdocrag.evaluation.pipeline import load_run_queries, validate_run_alignment
 from mmdocrag.io import write_processed_dataset
 from mmdocrag.retrieval.pipeline import apply_data_split
-from mmdocrag.schemas import DocumentRecord, EvidenceNode, PageRecord, QueryRecord
+from mmdocrag.schemas import DocumentRecord, EvidenceNode, PageRecord, QueryRecord, RetrievalHit
 
 
 def _records():
@@ -94,6 +94,45 @@ def test_evaluation_loads_only_the_split_queries(tmp_path, monkeypatch):
     selected = load_run_queries(
         run_dir,
         {"dataset": "demo", "data_split": {"name": "test"}},
+    )
+
+    assert [query.query_id for query in selected] == ["q_doc_test"]
+
+
+def test_evaluation_rejects_predictions_from_a_different_dataset_scope(tmp_path):
+    queries = [
+        QueryRecord(query_id="q_current", dataset="demo", doc_id="doc", question="问题")
+    ]
+    hits = [
+        RetrievalHit(
+            query_id="q_smoke",
+            rank=1,
+            score=1.0,
+            doc_id="doc",
+            page_id="doc_p1",
+            retriever="test",
+        )
+    ]
+
+    with pytest.raises(ValueError, match="Run/data mismatch"):
+        from mmdocrag.evaluation.pipeline import validate_run_alignment
+
+        validate_run_alignment(tmp_path / "run", {}, queries, hits)
+
+
+def test_evaluation_uses_run_processed_dataset(tmp_path, monkeypatch):
+    monkeypatch.setenv("MMDOC_RAG_DATA_ROOT", str(tmp_path / "data"))
+    documents, pages, nodes, queries = _records()
+    write_processed_dataset(
+        tmp_path / "data" / "processed" / "demo_smoke", documents, pages, nodes, queries
+    )
+    run_dir = tmp_path / "run"
+    run_dir.mkdir()
+    (run_dir / "data_split.yaml").write_text(_manifest(tmp_path).read_text(encoding="utf-8"), encoding="utf-8")
+
+    selected = load_run_queries(
+        run_dir,
+        {"dataset": "demo", "processed_dataset": "demo_smoke", "data_split": {"name": "test"}},
     )
 
     assert [query.query_id for query in selected] == ["q_doc_test"]

@@ -1,7 +1,7 @@
 # 小论文研究路线（SSOT）
 
 > Status: working | Scope: 小论文 Phase 1A → 1B → 1C → 2 | SSOT: 是
-> 当前方向只写在这里。方法细节 candidats 见 `docs/small_paper_research_plan_final.md`（待拆 `plan.md/method-spec.md`）。
+> 当前方向只写在这里。方法细节候选方案暂不固化；通过 Phase 1C Gate 后再建立 `method-spec.md`。
 
 ## 1. 题目与问题
 
