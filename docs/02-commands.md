@@ -39,16 +39,29 @@ uv run mdr evaluate --run runs/retrieval/cn_bm25_page/test/latest
 
 Dense/Hybrid 需本地 `BAAI/bge-small-zh-v1.5`，离线优先；允许下载时才加 `MDR_ALLOW_MODEL_DOWNLOAD=1`。
 
-## MMDocIR
+## MMDocIR smoke（EXP-001）
 
 ```powershell
-./tasks.ps1 mmdocir-smoke   # EXP-001 ColPali smoke，需 CUDA/MPS
-./tasks.ps1 mmdocir-bm25    # BM25 page baseline
+./tasks.ps1 mmdocir-smoke
 ```
 
-- 输入：`configs/experiments/mmdocir_colpali_smoke.yaml` / `mmdocir_bm25_page.yaml` + `data/processed/mmdocir_evaluation`
-- 输出：`runs/retrieval/mmdocir_colpali_smoke/<timestamp>/`、`runs/retrieval/mmdocir_bm25_page/<timestamp>/`
-- 检查：smoke 要求 `page_image_path` 存在；ColPali 在 CPU 下会被拒绝并报错（符合 `colpali.py` 设计）
+- 输入：`configs/experiments/mmdocir_colpali_smoke.yaml`（`top_k=5` 小样本）+ `data/processed/mmdocir_evaluation`
+- 输出：`runs/retrieval/mmdocir_colpali_smoke/<timestamp>/{predictions.parquet,config.json,run_info.json,metrics.json,errors.csv,summary.md}`
+- 检查：`page_image_path` 存在；CPU 下 ColPali 被拒绝并报错（符合 `colpali.py` 设计）；`hits=30` 小样本，不可当正式 baseline
+- 登记：`experiments/registry.csv` 中 EXP-001；详情 `experiments/2026-09-12-exp-001-colpali-smoke.md`
+
+## MMDocIR full（Phase 1A 全量 baseline，待跑）
+
+```powershell
+./tasks.ps1 mmdocir-full
+./tasks.ps1 mmdocir-bm25
+./tasks.ps1 evaluate-mmdocir -RunId "runs/retrieval/mmdocir_colpali/<timestamp>"
+```
+
+- 输入（full）：`configs/experiments/mmdocir_colpali.yaml`（`top_k=20`）+ `data/processed/mmdocir_evaluation`
+- 输出：`runs/retrieval/mmdocir_colpali/<timestamp>/`；BM25 对照 `runs/retrieval/mmdocir_bm25_page/<timestamp>/`
+- 检查：full 跑完才登记 Phase 1A baseline；smoke 只算流程验证
+- 注意：RTX 3080 Ti 12GB 用保守 batch（`image_batch_size=1, query_batch_size=2, score_batch_size=4`，见 full config 注释），embedding 缓存走 `artifacts/colpali/`
 
 ## 质量门
 
