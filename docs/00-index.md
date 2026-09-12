@@ -23,7 +23,8 @@
 
 - `docs/10-small-paper/plan.md`（SSOT）：研究方向 + Phase Gate
 - `docs/10-small-paper/protocol.md`（SSOT）：评价协议 + 防泄漏
-- `docs/10-small-paper/README.md`：其余映射表（method-spec/results 等待建）
+- `docs/10-small-paper/plan-source-final.md`：拆分源（只读）
+- `docs/paper/`：`01/02/03/04 + roadmap` 现行证据链，原位保留，拆完 SSOT 后再处理
 
 ## 实验过程
 
@@ -31,12 +32,11 @@
 - `experiments/templates/experiment-record.md`：详情模板（11 段）
 - `experiments/YYYY-MM-DD-exp-NNN-主题.md`：详情页
 - 已登记：EXP-001（smoke，完成）、EXP-002（full，待跑）
-- `docs/20-experiments/README.md`：使用规则（即将并入本表，过渡期以 `experiments/` 为准）
 
 ## 文献与归档
 
-- `docs/30-literature/README.md`：一句话结论 + 与本文关系
-- `docs/90-archive/README.md`：归档区只读（待第 6 步填充）
+- `docs/30-literature/README.md`：一句话结论 + 与本文关系（`docs/literature/` 12 篇待压缩）
+- `docs/90-archive/README.md`：第 6 步已归档 6 目录 + 根级 5 篇，只读（`docs/reproduction/` 保留不归档）
 
 ## 冻结记录
 
