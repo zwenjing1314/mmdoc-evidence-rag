@@ -1,7 +1,7 @@
 # 00-index（全仓导航 SSOT）
 
 > Status: stable | Scope: 全仓 | SSOT: 是
-> 新增/修改任何 SSOT 文档，必须同步更新本表状态行。三个月后项目乱不乱，看这张表有没有人维护。
+> 新增/修改任何 SSOT 文档，必须同步更新本表状态行。
 
 ## 五类信息去哪找
 
@@ -15,32 +15,34 @@
 
 ## 入门（按顺序读）
 
-1. `docs/01-quickstart.md`（stable, SSOT）：环境 + 数据准备（uv 主方案 / conda 兜底 / MMDocIR 数据位置）
-2. `docs/02-commands.md`（stable, SSOT）：命令唯一入口，命令/输入/输出/检查四件套
+1. `docs/01-quickstart.md`（stable, SSOT）：环境 + 数据准备
+2. `docs/02-commands.md`（stable, SSOT）：命令唯一入口
 3. `docs/03-glossary.md`（stable）：术语
 
-## 现行研究（小论文）
+## 现行研究（六篇闭环）
 
-- `docs/10-small-paper/plan.md`（SSOT）：研究方向 + Phase Gate
-- `docs/10-small-paper/protocol.md`（SSOT）：评价协议 + 防泄漏
+- `docs/10-small-paper/plan.md`（SSOT）：方向 + Phase Gate
+- `docs/10-small-paper/protocol.md`（SSOT）：协议 + 防泄漏
+- `docs/10-small-paper/results-dev.md`（引用页 → `docs/paper/02`）
+- `docs/10-small-paper/results-test.md`（引用页 → `docs/paper/03`）
+- `docs/10-small-paper/roadmap.md`（引用页 → `docs/paper/research_positioning_and_roadmap`）
 - `docs/10-small-paper/plan-source-final.md`：拆分源（只读）
-- `docs/paper/`：`01/02/03/04 + roadmap` 现行证据链，原位保留，拆完 SSOT 后再处理
+- `method-spec.md` 待 Phase 2 Gate 后再建
 
 ## 实验过程
 
-- `experiments/registry.csv`：注册表，一次正式 run 一行
-- `experiments/templates/experiment-record.md`：详情模板（11 段）
-- `experiments/YYYY-MM-DD-exp-NNN-主题.md`：详情页
-- 已登记：EXP-001（smoke，完成）、EXP-002（full，待跑）
+- `experiments/registry.csv`：注册表（EXP-001 完成、EXP-002 待重跑）
+- `experiments/templates/experiment-record.md`：11 段模板
+- `docs/20-experiments/mmdocir-external.md`：MMDocIR 外部验证引用页（→ `docs/paper/04`）
 
 ## 文献与归档
 
-- `docs/30-literature/README.md`：一句话结论 + 与本文关系（`docs/literature/` 12 篇待压缩）
-- `docs/90-archive/README.md`：第 6 步已归档 6 目录 + 根级 5 篇，只读（`docs/reproduction/` 保留不归档）
+- `docs/30-literature/README.md`：一句话五问表（`docs/literature/` 原位保留待压缩）
+- `docs/90-archive/README.md`：6 目录 + 根级 5 篇，只读
 
 ## 冻结记录
 
-- `FREEZE-20260912.md` + `FREEZE-*.txt`：第 1 步冻结证据，tag `archive-before-cleanup-20260912`
+- `FREEZE-20260912.md` + `FREEZE-*.txt`：tag `archive-before-cleanup-20260912`
 
 ## 状态图例
 
