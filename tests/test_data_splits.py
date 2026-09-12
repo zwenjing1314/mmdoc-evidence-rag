@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import pytest
 
-from mmdocrag.evaluation.pipeline import load_run_queries, validate_run_alignment
+from mmdocrag.evaluation.pipeline import load_run_queries
 from mmdocrag.io import write_processed_dataset
 from mmdocrag.retrieval.pipeline import apply_data_split
 from mmdocrag.schemas import DocumentRecord, EvidenceNode, PageRecord, QueryRecord, RetrievalHit

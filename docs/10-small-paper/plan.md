@@ -10,8 +10,8 @@
 ## 2. Phase Gate（硬门槛）
 
 ```text
-Phase 1A：数据、环境、ColPali 页级 baseline        ← 当前位置（EXP-001 smoke 已成，EXP-002 full 待跑）
-Phase 1B：页面命中 vs 区域命中缺口诊断（A/B/C/D 四类 + 按类型/面积/OCR密度分层）
+Phase 1A：数据、环境、ColPali 页级 baseline        ← 已完成（EXP-002 正式 full baseline）
+Phase 1B：页面命中 vs 区域命中缺口诊断（A/B/C/D 四类 + 按类型/面积/OCR密度分层） ← 下一步
 Phase 1C：Snappy-style / 固定 BBox / 动态显著区域三基线
 Phase 2：缺口稳定且规则方法不足，才训练稀疏融合网络
 ```
