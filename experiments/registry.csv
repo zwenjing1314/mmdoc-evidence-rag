@@ -1,4 +1,4 @@
 exp_id,exp_date,dataset,split,query_count,config,run_dir,backend,page_r_at_5,region_hit_at_5,sufficiency_rate,note
 EXP-DEMO,,demo,-,,configs/experiments/demo_page_region.yaml,runs/retrieval/demo_page_region/latest,,...,,-,模板行
 EXP-001,2026-09-12,mmdocir_evaluation,-,small-sample(hits=30),configs/experiments/mmdocir_colpali_smoke.yaml,runs/retrieval/mmdocir_colpali_smoke/20260912_123624,colpali_page,1.0,0.0,,Phase 1A smoke 流程验证 不作正式结果 详见 experiments/2026-09-12-exp-001-colpali-smoke.md
-EXP-002,,mmdocir_evaluation,-,,configs/experiments/mmdocir_colpali.yaml,runs/retrieval/mmdocir_colpali/latest,,...,,-,Phase 1A full 待跑 top_k=20
+EXP-002,2026-08-31,mmdocir_evaluation,-,hits=30112待核对,configs/experiments/mmdocir_colpali.yaml,runs/retrieval/mmdocir_colpali/20260831_163643,colpali_page,1.0,0.0,,旧run补登记 复评通过 但疑为小样本 不作论文结论 需重跑全量 详见 experiments/2026-09-12-exp-002-colpali-full.md
