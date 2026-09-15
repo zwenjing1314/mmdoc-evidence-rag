@@ -3,43 +3,38 @@
 > Status: stable | Scope: 环境 + 数据准备入口 | SSOT: 是
 > 环境细节只写在这里。`02-commands.md` 只写命令，不重复环境。
 
-## 1. 主方案：uv（日常开发唯一入口）
+## 1. 唯一环境：uv
 
 ```powershell
 cd "c:\Users\WenJing\Documents\WorkTransfer\mmdoc-evidence-rag"
 uv sync --dev
-uv run mdr --help
-uv run pytest
+uv run --extra colpali mdr --help
+uv run --extra colpali pytest
 ```
 
 版本以 `pyproject.toml` + `uv.lock` + `.python-version` 为准（Python `>=3.11,<3.13`）。
 
-ColPali 另需 GPU 依赖（CPU 会被 `src/mmdocrag/retrieval/colpali.py` 主动拒绝）：
+ColPali 也使用同一个 uv 项目环境。Windows GPU 依赖由 `pyproject.toml` 中的 PyTorch `cu130` 源锁定；不要激活或使用 Conda/`.venv-colpali` 运行项目：
 
 ```powershell
-uv sync --extra colpali
+Remove-Item Env:VIRTUAL_ENV -ErrorAction SilentlyContinue
+Remove-Item Env:UV_PROJECT_ENVIRONMENT -ErrorAction SilentlyContinue
+uv sync --dev --extra colpali
+uv run --extra colpali python -c "import torch, colpali_engine; print(torch.__version__); print(torch.cuda.is_available())"
 ```
 
-## 2. 第二方案：Conda（仅兜底）
+## 2. 环境职责
 
-Conda 是第二方案，仅在某台机器遇到 CUDA、系统库或解释器兼容问题时用。日常加依赖、锁版本仍用 uv。
+项目正式环境只有 uv 创建的 `.venv`。旧的 Conda `colpali` 和 `.venv-colpali` 仅作为迁移期备份，暂不删除，且不得用于正式实验。论文复现以 `pyproject.toml + uv.lock + .python-version` 为准。
 
-```powershell
-conda env create -f environment.yml
-conda activate mmdoc-rag
-conda env update -f environment.yml --prune
-```
+运行 `./tasks.ps1 mmdocir-smoke` 或 `./tasks.ps1 mmdocir-full` 前确保没有激活其他虚拟环境。脚本会检查 uv 环境的 `torch.cuda.is_available()`。
 
-对应关系：`environment.yml`（conda）与 `pyproject.toml`（uv）保持同源，论文复现以 `pyproject.toml + uv.lock + .python-version` 为准。
+## 3. PyTorch / CUDA 策略
 
-`tasks.ps1` 打印的 `Environment` 行会同时显示 uv 环境与当前 `CONDA_DEFAULT_ENV`（如有），便于反查本次实验到底在哪个解释器下跑的。
+Windows ColPali extra 固定使用 `torch==2.13.0`、`torchvision==0.28.0` 的 `cu130` wheels；普通 `uv sync --dev` 不安装 ColPali extra，但项目中的基础深度学习依赖仍会复用同一 CUDA torch 版本。
 
-## 3. PyTorch / CUDA 策略（不写死版本）
-
-`pyproject.toml` 不写死 `torch`，按机器装：
-
-- 本机 Windows：按 [PyTorch 官网](https://pytorch.org/get-started/locally/)选 CUDA 版本装；
-- 验证：`uv run python -c "import torch; print(torch.__version__); print(torch.cuda.is_available())"`。
+- 验证：`uv run --extra colpali python -c "import torch; print(torch.__version__); print(torch.cuda.is_available())"`。
+- 若下载出现 SSL EOF，先执行 `$env:UV_SYSTEM_CERTS = "true"`；`tasks.ps1` 会自动设置该变量。
 
 ## 4. MMDocIR 数据位置和准备（SSOT）
 
@@ -70,7 +65,7 @@ data/interim/mmdocir_evaluation/page_images/  # 页面图，colpali 必需
 Smoke 必须写入独立目录，不能用 `--limit-docs` 覆盖 full 目录：
 
 ```powershell
-uv run mdr prepare --dataset mmdocir_evaluation --limit-docs 1 --output-dataset mmdocir_evaluation_smoke
+uv run --extra colpali mdr prepare --dataset mmdocir_evaluation --limit-docs 1 --output-dataset mmdocir_evaluation_smoke
 ```
 
 ## 5. 中文年报数据（SSOT 引用）

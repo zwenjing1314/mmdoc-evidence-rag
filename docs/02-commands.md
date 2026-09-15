@@ -3,7 +3,7 @@
 > Status: stable | Scope: 全仓命令 | SSOT: 是
 > 本篇是命令唯一真理源。其他文档只允许引用，不许重复写长命令。
 
-约定：所有命令在项目根目录执行；Windows 优先用 `./tasks.ps1`，它已内置 `UV_CACHE_DIR=.uv-cache` 与 ColPali 所需 `HF_HOME=artifacts/hf_cache`。
+约定：所有命令在项目根目录执行；Windows 优先用 `./tasks.ps1`。所有任务都使用同一个 uv `.venv`；ColPali 任务额外检查 CUDA。
 
 每条格式固定为：命令 / 输入 / 输出 / 检查。
 
@@ -33,8 +33,8 @@
 
 ```powershell
 $env:UV_CACHE_DIR = ".uv-cache"
-uv run mdr retrieve --config configs/experiments/cn_bm25_page.yaml
-uv run mdr evaluate --run runs/retrieval/cn_bm25_page/test/latest
+uv run --extra colpali mdr retrieve --config configs/experiments/cn_bm25_page.yaml
+uv run --extra colpali mdr evaluate --run runs/retrieval/cn_bm25_page/test/latest
 ```
 
 Dense/Hybrid 需本地 `BAAI/bge-small-zh-v1.5`，离线优先；允许下载时才加 `MDR_ALLOW_MODEL_DOWNLOAD=1`。
@@ -47,8 +47,8 @@ Dense/Hybrid 需本地 `BAAI/bge-small-zh-v1.5`，离线优先；允许下载时
 
 - 输入：`configs/experiments/mmdocir_colpali_smoke.yaml`（`top_k=5` 小样本）+ `data/processed/mmdocir_evaluation_smoke`
 - 输出：`runs/retrieval/mmdocir_colpali_smoke/<timestamp>/{predictions.parquet,config.json,run_info.json,metrics.json,errors.csv,summary.md}`
-- 检查：`page_image_path` 存在；CPU 下 ColPali 被拒绝并报错（符合 `colpali.py` 设计）；`hits=30` 小样本，不可当正式 baseline
-- 准备：`uv run mdr prepare --dataset mmdocir_evaluation --limit-docs 1 --output-dataset mmdocir_evaluation_smoke`，不会覆盖 full 目录
+- 检查：`page_image_path` 存在；脚本确认 uv 环境 `torch.cuda.is_available()=True`；`hits=30` 小样本，不可当正式 baseline
+- 准备：`uv run --extra colpali mdr prepare --dataset mmdocir_evaluation --limit-docs 1 --output-dataset mmdocir_evaluation_smoke`，不会覆盖 full 目录
 - 登记：`experiments/registry.csv` 中 EXP-001；详情 `experiments/2026-09-12-exp-001-colpali-smoke.md`
 
 ## MMDocIR full（Phase 1A 全量 baseline，待跑）
@@ -63,7 +63,7 @@ Dense/Hybrid 需本地 `BAAI/bge-small-zh-v1.5`，离线优先；允许下载时
 - 输出：`runs/retrieval/mmdocir_colpali/<timestamp>/`；BM25 对照 `runs/retrieval/mmdocir_bm25_page/<timestamp>/`
 - 检查：full 跑完才登记 Phase 1A baseline；smoke 只算流程验证
 - 启动前检查：`tasks.ps1` 要求 `documents=313, pages=20395, nodes=170338, queries=1658`，不满足时会停止，不启动模型
-- 注意：RTX 3080 Ti 12GB 用保守 batch（`image_batch_size=1, query_batch_size=2, score_batch_size=4`，见 full config 注释），embedding 缓存走 `artifacts/colpali/`
+- 注意：uv `.venv` 中必须是 CUDA torch；RTX 3080 Ti 12GB 用保守 batch（`image_batch_size=1, query_batch_size=2, score_batch_size=4`，见 full config 注释），embedding 缓存走 `artifacts/colpali/`
 
 ## 质量门
 
@@ -77,4 +77,4 @@ Dense/Hybrid 需本地 `BAAI/bge-small-zh-v1.5`，离线优先；允许下载时
 
 ## CLI 全量（备查）
 
-`prepare` / `build-cn-annotations` / `retrieve [--split train|dev|test]` / `evaluate` / `verify-evidence [--top-k]` / `export-demo`，以 `uv run mdr --help` 为准。`build-evidence-sets/generate/verify` 尚未注册，不可运行。
+`prepare` / `build-cn-annotations` / `retrieve [--split train|dev|test]` / `evaluate` / `verify-evidence [--top-k]` / `export-demo`，以 `uv run --extra colpali mdr --help` 为准。`build-evidence-sets/generate/verify` 尚未注册，不可运行。

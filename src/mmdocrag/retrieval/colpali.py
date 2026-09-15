@@ -64,8 +64,9 @@ class ColPaliPageRetriever:
             from colpali_engine.utils.torch_utils import get_torch_device
         except ImportError as exc:
             raise RuntimeError(
-                "ColPali is optional. Install it on the CUDA machine with `uv sync --extra colpali` "
-                "or `python -m pip install -e .[colpali]`."
+                "ColPali requires a CUDA- or Apple-MPS-enabled PyTorch environment. "
+                "On Windows, run `uv sync --dev --extra colpali`; then verify "
+                "`uv run --extra colpali python -c \"import torch; print(torch.cuda.is_available())\"`."
             ) from exc
 
         device = get_torch_device("auto")

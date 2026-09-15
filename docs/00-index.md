@@ -19,6 +19,17 @@
 2. `docs/02-commands.md`（stable, SSOT）：命令唯一入口
 3. `docs/03-glossary.md`（stable）：术语
 
+## 项目规范与协作（新增，均为 SSOT）
+
+- `docs/PROJECT_RULES.md`（stable, SSOT）：开发规范十条铁律
+- `docs/THESIS_RESEARCH_ROUTE_DRAFT.md`（working, SSOT）：大论文规范与研究边界
+- `docs/SMALL_PAPER_DEV_SPEC.md`（working, SSOT）：小论文开发执行说明
+- `docs/handoff.md`（working）：变化的进度，新会话手动 @
+- `docs/MIGRATION.md`（working）：旧仓库 → 新项目迁移清单
+- `docs/NEW_PROJECT_SCAFFOLD.md`（working）：新项目骨架生成清单
+- `.cursor/rules/`（stable）：Cursor 自动加载规则（00 核心铁律 / 01 沟通 / 02 新技术准入 / 10 研究边界 / 20 实验协议 / 30 融合架构）
+- `.cursor/skills/mmdoc-evidence-research/`（working）：研究罗盘 skill，已对齐新主线；根目录 `skills/` 为旧 Codex 版本待归档
+
 ## 现行研究
 
 - `docs/10-small-paper/plan.md`（SSOT）：方向 + Phase Gate

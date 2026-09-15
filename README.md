@@ -95,7 +95,7 @@ uv python install 3.11
 uv sync --dev
 ```
 
-IDE 中选择项目环境的 Python：Windows 通常为 `.venv\Scripts\python.exe`；如果使用已验证的 Conda GPU 环境，则选择 `C:\Users\WenJing\anaconda3\envs\colpali\python.exe`。
+IDE 中唯一允许选择的项目解释器是 Windows 的 `.venv\Scripts\python.exe`。ColPali 的 CUDA 依赖也安装在这个环境中；不要为本项目选择 Conda、全局 Python 或旧的 `.venv-colpali`。
 
 详细步骤见 [docs/01-quickstart.md](docs/01-quickstart.md)。旧环境说明已移入 `docs/90-archive/`，不再作为入口。
 

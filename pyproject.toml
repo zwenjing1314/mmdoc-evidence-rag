@@ -41,6 +41,8 @@ dependencies = [
 # Install on the CUDA evaluation machine before running the ColPali baseline.
 colpali = [
   "colpali-engine>=0.3.0",
+  "torch==2.13.0",
+  "torchvision==0.28.0",
 ]
 
 [dependency-groups]
@@ -57,6 +59,22 @@ dev = [
 
 [tool.uv]
 package = true
+
+# Windows GPU installation for the ColPali extra. The explicit index keeps
+# regular uv syncs on PyPI while ensuring the ColPali environment gets CUDA
+# wheels instead of the CPU-only PyPI builds.
+[tool.uv.sources]
+torch = [
+  { index = "pytorch-cu130", marker = "sys_platform == 'win32'" },
+]
+torchvision = [
+  { index = "pytorch-cu130", marker = "sys_platform == 'win32'" },
+]
+
+[[tool.uv.index]]
+name = "pytorch-cu130"
+url = "https://download.pytorch.org/whl/cu130"
+explicit = true
 
 [project.scripts]
 mdr = "mmdocrag.cli:app"
